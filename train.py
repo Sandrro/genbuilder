@@ -111,12 +111,19 @@ if __name__ == "__main__":
     random.seed(42)  # make sure every time has the same training and validation sets
 
     root = os.getcwd()
-    dataset_path = os.path.join(root, 'dataset')  ### you may set up your own dataset
+
+    # configuration file can be overridden via env var
+    cfg_file = os.environ.get("TRAIN_CONFIG", "train_gnn.yaml")
+    train_opt = read_train_yaml(root, filename=cfg_file)
+
+    # allow custom dataset location (env var takes precedence over yaml field)
+    dataset_path = os.environ.get(
+        "DATASET_ROOT",
+        os.path.join(root, train_opt.get("dataset_root", "dataset")),
+    )
 
     # NEW: make sure gpickles are sequentially named before dataset loads them
     _ensure_sequential_gpickles(dataset_path)
-
-    train_opt = read_train_yaml(root, filename="train_gnn.yaml")
     print(train_opt)
     is_resmue = train_opt['resume']
     gpu_ids = train_opt['gpu_ids']

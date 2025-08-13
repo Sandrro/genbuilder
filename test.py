@@ -173,10 +173,18 @@ if __name__ == "__main__":
     root = os.getcwd()
     random.seed(42)
 
-    pth_name = 'latest'
-    epoch_name = 'GlobalMapperGATConv_Max_dim256_lr0.001_epochs1_batch200_2025-08-12 15:53:30'
-    dataset_path = '/root/GlobalMapper/my_dataset'
+    # allow overriding via environment variables
+    pth_name = os.environ.get('MODEL_CHECKPOINT', 'latest')
+    dataset_path = os.environ.get('DATASET_ROOT', os.path.join(root, 'dataset'))
+    epoch_name = os.environ.get('EPOCH_NAME')
     data_name = 'osm_cities'
+
+    if epoch_name is None:
+        epoch_root = os.path.join(root, 'epoch')
+        candidates = [d for d in os.listdir(epoch_root) if os.path.isdir(os.path.join(epoch_root, d))]
+        if not candidates:
+            raise RuntimeError('No epoch directory found. Set EPOCH_NAME env var.')
+        epoch_name = max(candidates, key=lambda d: os.path.getmtime(os.path.join(epoch_root, d)))
 
     gpu_ids = 0
     batch_size = 1

@@ -19,6 +19,48 @@ pip install torch-geometric
 ```
 Then you may install other dependencies like: matplotlib, yaml, pickle, etc.
 
+## Docker & Docker Compose
+
+For remote experiments the project ships with a `Dockerfile` and
+`docker-compose.yml` that wrap training and evaluation.
+
+1. **Build the image**
+
+   ```bash
+   docker compose build
+   ```
+
+2. **Launch training** (uses `my_dataset/` and `train_gnn.yaml` from the host):
+
+   ```bash
+   docker compose run --rm train
+   ```
+
+   Extra arguments are appended to the training command, e.g. to upload to
+   HuggingFace:
+
+   ```bash
+   docker compose run --rm train --upload_repo <repo> --hf_token <token>
+   ```
+
+3. **Run tests only** (optionally select an epoch directory):
+
+   ```bash
+   # run on latest epoch
+   docker compose run --rm test
+
+   # or specify which epoch to evaluate
+   docker compose run --rm test --epoch <epoch_dir>
+   ```
+
+Artifacts and logs are written to the host `epoch/`, `logs/` and
+`tensorboard/` directories thanks to volume mounts. You can inspect
+real-time container output with:
+
+```bash
+docker compose logs -f train
+```
+
 ## Dataset
 We provide a 10K dataset sample in the repo. You may directly unzip it ("dataset.tar.gz").
 
