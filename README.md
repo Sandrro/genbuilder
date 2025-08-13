@@ -45,12 +45,13 @@ evaluation.
 
 3. **Upload dataset files**
 
-   One or more `.gpickle` files can be uploaded before training:
+   Upload multiple `.gpickle` files and (optionally) `_zones_map.json` before training:
 
    ```bash
    curl -X POST http://localhost:8000/data \
         -F "files=@my_dataset/processed/quarter1.gpickle" \
-        -F "files=@my_dataset/processed/quarter2.gpickle"
+        -F "files=@my_dataset/processed/quarter2.gpickle" \
+        -F "files=@my_dataset/processed/_zones_map.json"
    ```
 
 4. **Start training**

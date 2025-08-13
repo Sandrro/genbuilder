@@ -24,17 +24,26 @@ class TestRequest(BaseModel):
 
 @app.post("/data")
 async def upload_data(files: List[UploadFile] = File(...)):
-    """Upload one or more .gpickle files into the dataset's processed directory."""
-    dest = os.path.join("my_dataset", "processed")
-    os.makedirs(dest, exist_ok=True)
-    saved = []
+    """Upload .gpickle files (multiple) and optional _zones_map.json."""
+    dest_proc = os.path.join("my_dataset", "processed")
+    dest_root = os.path.join("my_dataset")
+    os.makedirs(dest_proc, exist_ok=True)
+    os.makedirs(dest_root, exist_ok=True)
+    saved: list[str] = []
     for file in files:
-        if not file.filename.endswith(".gpickle"):
-            raise HTTPException(status_code=400, detail="only .gpickle files supported")
-        target = os.path.join(dest, file.filename)
-        with open(target, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-        saved.append(file.filename)
+        fname = file.filename
+        if fname.endswith(".gpickle"):
+            target = os.path.join(dest_proc, fname)
+            with open(target, "wb") as f:
+                shutil.copyfileobj(file.file, f)
+        elif fname == "_zones_map.json":
+            data = await file.read()
+            for target in [os.path.join(dest_root, fname), os.path.join(dest_proc, fname)]:
+                with open(target, "wb") as f:
+                    f.write(data)
+        else:
+            raise HTTPException(status_code=400, detail="only .gpickle or _zones_map.json supported")
+        saved.append(fname)
     return {"saved": saved}
 
 def _launch(cmd: list[str]):
