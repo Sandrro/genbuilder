@@ -1,22 +1,13 @@
 services:
-  train:
-    build: .
-    gpus: all
-    volumes:
-      - ./my_dataset:/app/my_dataset
-      - ./train_gnn.yaml:/app/train_gnn.yaml
-      - ./epoch:/app/epoch
-      - ./logs:/app/logs
-      - ./tensorboard:/app/tensorboard
-    command: --dataset my_dataset --config train_gnn.yaml --train
 
-  test:
+  app:
     build: .
     gpus: all
+    ports:
+      - "8000:8000"
     volumes:
       - ./my_dataset:/app/my_dataset
       - ./train_gnn.yaml:/app/train_gnn.yaml
       - ./epoch:/app/epoch
       - ./logs:/app/logs
       - ./tensorboard:/app/tensorboard
-    command: --dataset my_dataset --config train_gnn.yaml --test

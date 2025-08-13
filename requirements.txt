@@ -12,3 +12,6 @@ networkx
 shapely
 pillow
 tqdm
+fastapi
+uvicorn
+

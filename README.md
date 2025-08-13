@@ -8,7 +8,6 @@ This repo contains codes for single GPU training for
 
 **Note that this repo is lack of code comments.**
 
-
 ## Environment
 We provide required environments in "environment.yml". But practially we suggest to use below commands for crucial dependencies:
 ```
@@ -22,13 +21,9 @@ Then you may install other dependencies like: matplotlib, yaml, pickle, etc.
 ## Docker & Docker Compose
 
 For remote experiments the project ships with a `Dockerfile` and
-`docker-compose.yml` that wrap training and evaluation.
 
-1. **Build the image**
-
-   ```bash
-   docker compose build
-   ```
+`docker-compose.yml` that expose a FastAPI service wrapping training and
+evaluation.
 
 2. **Launch training** (uses `my_dataset/` and `train_gnn.yaml` from the host):
 
