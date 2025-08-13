@@ -1,7 +1,11 @@
 import os
 import glob
 import subprocess
-from fastapi import FastAPI, HTTPException
+
+import shutil
+from typing import List
+from fastapi import FastAPI, HTTPException, UploadFile, File
+
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -16,6 +20,22 @@ class TestRequest(BaseModel):
     config: str = "train_gnn.yaml"
     dataset: str = "my_dataset"
     epoch: str | None = None
+
+
+@app.post("/data")
+async def upload_data(files: List[UploadFile] = File(...)):
+    """Upload one or more .gpickle files into the dataset's processed directory."""
+    dest = os.path.join("my_dataset", "processed")
+    os.makedirs(dest, exist_ok=True)
+    saved = []
+    for file in files:
+        if not file.filename.endswith(".gpickle"):
+            raise HTTPException(status_code=400, detail="only .gpickle files supported")
+        target = os.path.join(dest, file.filename)
+        with open(target, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        saved.append(file.filename)
+    return {"saved": saved}
 
 def _launch(cmd: list[str]):
     """Run command in background without blocking the API."""

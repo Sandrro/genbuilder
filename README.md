@@ -25,36 +25,60 @@ For remote experiments the project ships with a `Dockerfile` and
 `docker-compose.yml` that expose a FastAPI service wrapping training and
 evaluation.
 
-2. **Launch training** (uses `my_dataset/` and `train_gnn.yaml` from the host):
+1. **Build the image**
 
    ```bash
-   docker compose run --rm train
+   docker compose build
    ```
 
-   Extra arguments are appended to the training command, e.g. to upload to
-   HuggingFace:
+   The Dockerfile strips Python `__pycache__` directories after installing
+   dependencies to keep the image compact and speed up the final
+   *"unpacking"* stage.
+
+2. **Launch the API server**
 
    ```bash
-   docker compose run --rm train --upload_repo <repo> --hf_token <token>
+   docker compose up
    ```
 
-3. **Run tests only** (optionally select an epoch directory):
+   The service listens on `http://localhost:8000`.
+
+3. **Upload dataset files**
+
+   One or more `.gpickle` files can be uploaded before training:
 
    ```bash
-   # run on latest epoch
-   docker compose run --rm test
+   curl -X POST http://localhost:8000/data \
+        -F "files=@my_dataset/processed/quarter1.gpickle" \
+        -F "files=@my_dataset/processed/quarter2.gpickle"
+   ```
 
-   # or specify which epoch to evaluate
-   docker compose run --rm test --epoch <epoch_dir>
+4. **Start training**
+
+   ```bash
+   curl -X POST http://localhost:8000/train \
+        -H 'Content-Type: application/json' \
+        -d '{"dataset":"my_dataset","config":"train_gnn.yaml"}'
+   ```
+
+5. **Run evaluation**
+
+   ```bash
+   curl -X POST http://localhost:8000/test \
+        -H 'Content-Type: application/json' \
+        -d '{"dataset":"my_dataset","config":"train_gnn.yaml","epoch":"<epoch_dir>"}'
+   ```
+
+6. **Inspect logs**
+
+   ```bash
+   curl http://localhost:8000/logs
+   curl http://localhost:8000/logs/<logfile>
    ```
 
 Artifacts and logs are written to the host `epoch/`, `logs/` and
-`tensorboard/` directories thanks to volume mounts. You can inspect
-real-time container output with:
+`tensorboard/` directories thanks to volume mounts.
 
-```bash
-docker compose logs -f train
-```
 
 ## Dataset
 We provide a 10K dataset sample in the repo. You may directly unzip it ("dataset.tar.gz").
