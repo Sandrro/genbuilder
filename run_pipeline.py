@@ -18,6 +18,7 @@ def main():
     parser = argparse.ArgumentParser(description="Utility to train/test and upload models")
     parser.add_argument("--config", default="train_gnn.yaml", help="Path to training YAML")
     parser.add_argument("--dataset", default="my_dataset", help="Path to dataset root")
+    parser.add_argument("--epoch", default=None, help="Epoch directory name to use for testing")
     parser.add_argument("--train", action="store_true", help="Run training")
     parser.add_argument("--test", action="store_true", help="Run test after training")
     parser.add_argument("--upload_repo", default=None, help="HuggingFace repo id to upload model")
@@ -27,13 +28,15 @@ def main():
     env = os.environ.copy()
     env["DATASET_ROOT"] = os.path.abspath(args.dataset)
     env["TRAIN_CONFIG"] = os.path.abspath(args.config)
+    if args.epoch:
+        env["EPOCH_NAME"] = args.epoch
 
     latest_epoch = None
 
     if args.train:
         run(["python", "train.py"], env=env)
         epoch_dirs = glob.glob(os.path.join(os.getcwd(), "epoch", "*"))
-        if epoch_dirs:
+        if epoch_dirs and not args.epoch:
             latest_epoch = max(epoch_dirs, key=os.path.getmtime)
             env["EPOCH_NAME"] = os.path.basename(latest_epoch)
 
