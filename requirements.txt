@@ -1,0 +1,16 @@
+torch
+torchvision
+torch-geometric
+tensorboard_logger
+pyyaml
+huggingface_hub
+numpy
+scipy
+scikit-learn
+matplotlib
+networkx
+shapely
+pillow
+tqdm
+fastapi
+uvicorn

@@ -19,6 +19,52 @@ pip install torch-geometric
 ```
 Then you may install other dependencies like: matplotlib, yaml, pickle, etc.
 
+## Docker & Docker Compose
+
+For remote experiments the project ships with a `Dockerfile` and
+`docker-compose.yml` that expose a FastAPI service wrapping training and
+evaluation.
+
+1. **Build the image**
+
+   ```bash
+   docker compose build
+   ```
+
+2. **Launch the API server**
+
+   ```bash
+   docker compose up
+   ```
+
+   The service listens on `http://localhost:8000`.
+
+3. **Start training**
+
+   ```bash
+   curl -X POST http://localhost:8000/train \
+        -H 'Content-Type: application/json' \
+        -d '{"dataset":"my_dataset","config":"train_gnn.yaml"}'
+   ```
+
+4. **Run evaluation**
+
+   ```bash
+   curl -X POST http://localhost:8000/test \
+        -H 'Content-Type: application/json' \
+        -d '{"dataset":"my_dataset","config":"train_gnn.yaml","epoch":"<epoch_dir>"}'
+   ```
+
+5. **Inspect logs**
+
+   ```bash
+   curl http://localhost:8000/logs
+   curl http://localhost:8000/logs/<logfile>
+   ```
+
+Artifacts and logs are written to the host `epoch/`, `logs/` and
+`tensorboard/` directories thanks to volume mounts.
+
 ## Dataset
 We provide a 10K dataset sample in the repo. You may directly unzip it ("dataset.tar.gz").
 
