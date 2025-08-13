@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   train:
     build: .
@@ -10,7 +8,7 @@ services:
       - ./epoch:/app/epoch
       - ./logs:/app/logs
       - ./tensorboard:/app/tensorboard
-    command: python run_pipeline.py --dataset my_dataset --config train_gnn.yaml --train
+    command: --dataset my_dataset --config train_gnn.yaml --train
 
   test:
     build: .
@@ -21,4 +19,4 @@ services:
       - ./epoch:/app/epoch
       - ./logs:/app/logs
       - ./tensorboard:/app/tensorboard
-    command: python run_pipeline.py --dataset my_dataset --config train_gnn.yaml --test
+    command: --dataset my_dataset --config train_gnn.yaml --test
