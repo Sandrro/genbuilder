@@ -8,7 +8,6 @@ This repo contains codes for single GPU training for
 
 **Note that this repo is lack of code comments.**
 
-
 ## Environment
 We provide required environments in "environment.yml". But practially we suggest to use below commands for crucial dependencies:
 ```
@@ -22,6 +21,7 @@ Then you may install other dependencies like: matplotlib, yaml, pickle, etc.
 ## Docker & Docker Compose
 
 For remote experiments the project ships with a `Dockerfile` and
+
 `docker-compose.yml` that expose a FastAPI service wrapping training and
 evaluation.
 
@@ -78,6 +78,7 @@ evaluation.
 
 Artifacts and logs are written to the host `epoch/`, `logs/` and
 `tensorboard/` directories thanks to volume mounts.
+
 
 ## Dataset
 We provide a 10K dataset sample in the repo. You may directly unzip it ("dataset.tar.gz").
