@@ -8,7 +8,6 @@ This repo contains codes for single GPU training for
 
 **Note that this repo is lack of code comments.**
 
-
 ## Environment
 We provide required environments in "environment.yml". But practially we suggest to use below commands for crucial dependencies:
 ```
@@ -22,48 +21,40 @@ Then you may install other dependencies like: matplotlib, yaml, pickle, etc.
 ## Docker & Docker Compose
 
 For remote experiments the project ships with a `Dockerfile` and
+
 `docker-compose.yml` that expose a FastAPI service wrapping training and
 evaluation.
 
-1. **Build the image**
+2. **Launch training** (uses `my_dataset/` and `train_gnn.yaml` from the host):
 
    ```bash
-   docker compose build
+   docker compose run --rm train
    ```
 
-2. **Launch the API server**
+   Extra arguments are appended to the training command, e.g. to upload to
+   HuggingFace:
 
    ```bash
-   docker compose up
+   docker compose run --rm train --upload_repo <repo> --hf_token <token>
    ```
 
-   The service listens on `http://localhost:8000`.
-
-3. **Start training**
+3. **Run tests only** (optionally select an epoch directory):
 
    ```bash
-   curl -X POST http://localhost:8000/train \
-        -H 'Content-Type: application/json' \
-        -d '{"dataset":"my_dataset","config":"train_gnn.yaml"}'
-   ```
+   # run on latest epoch
+   docker compose run --rm test
 
-4. **Run evaluation**
-
-   ```bash
-   curl -X POST http://localhost:8000/test \
-        -H 'Content-Type: application/json' \
-        -d '{"dataset":"my_dataset","config":"train_gnn.yaml","epoch":"<epoch_dir>"}'
-   ```
-
-5. **Inspect logs**
-
-   ```bash
-   curl http://localhost:8000/logs
-   curl http://localhost:8000/logs/<logfile>
+   # or specify which epoch to evaluate
+   docker compose run --rm test --epoch <epoch_dir>
    ```
 
 Artifacts and logs are written to the host `epoch/`, `logs/` and
-`tensorboard/` directories thanks to volume mounts.
+`tensorboard/` directories thanks to volume mounts. You can inspect
+real-time container output with:
+
+```bash
+docker compose logs -f train
+```
 
 ## Dataset
 We provide a 10K dataset sample in the repo. You may directly unzip it ("dataset.tar.gz").
