@@ -3,21 +3,23 @@ gpu_ids :
   - 0
 
 clean_cache : False
-save_record : False
+save_record : True
 is_multigpu : False
 
-save_epoch : 50
+save_epoch : 1
 val_ratio : 0.2
-total_epochs : 1000
+total_epochs : 1
 start_epoch : 0
 
 
 ###################################   GlobalMapper setting   #######################################
-is_Teaser : False  ### test for full continuous generation
-is_conditional_block : False
+is_Teaser : False
+is_conditional_block : True        # <-- было False, теперь True
 is_input_road: True
-encode_cnn : True
+encode_cnn : True                  # оставить True, если используешь *_cnn модель
 is_blockplanner : False
+
+cond_dim: 12                       # <-- число классов зон из _zones_map.json
 
 attten_net : 
   - 'TransformerConv'

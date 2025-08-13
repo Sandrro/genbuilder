@@ -316,20 +316,30 @@ def get_polyskeleton_longest_path(skeleton, polygon):
 
     return G, longest_skel
 
+def get_k_angle(p1, p2) -> float:
+    """Угол (радианы) направления сегмента p1->p2 в [-π, π]."""
+    dx = float(p2.x - p1.x)
+    dy = float(p2.y - p1.y)
+    return float(np.arctan2(dy, dx))
+
+def angle_diff(a, b) -> float:
+    # минимальная разница углов с учетом 2π
+    return float(abs(np.arctan2(np.sin(a-b), np.cos(a-b))))
+
 def get_modified_nodes(coords):
     default = 1
     for i in range(coords.shape[1] - 2):
-        k1 = get_k_angle(Point(coords[:,i]), Point(coords[:,i+1]) )
-        k2 = get_k_angle(Point(coords[:,i+1]), Point(coords[:,i+2]) )
-        if np.abs(k1 - k2) > 2 * np.pi/36.0:  # 5 degree
-            return i+1
+        k1 = get_k_angle(Point(coords[:, i]),   Point(coords[:, i+1]))
+        k2 = get_k_angle(Point(coords[:, i+1]), Point(coords[:, i+2]))
+        if angle_diff(k1, k2) > np.deg2rad(10):  # порог 10°
+            return i + 1
     return default
 
 def _azimuth(point1, point2):
     """azimuth between 2 points (interval 0 - 180)"""
     import numpy as np
 
-    angle = np.arctan2(point2[0] - point1[0], point2[1] - point1[1])
+    angle = np.arctan2(point2[1] - point1[1], point2[0] - point1[0])  # было (dx, dy)
     return np.degrees(angle) if angle > 0 else np.degrees(angle) + 180
 
 def _dist(a, b):
@@ -380,9 +390,9 @@ def get_extend_line(a, b, block, isfront, is_extend_from_end = False):
     minx, miny, maxx, maxy = block.bounds
     if a.x == b.x:  # vertical line
         if a.y <= b.y:
-            extended_line = LineString([a, (a.x, minx)])
+            extended_line = LineString([a, (a.x, miny)])  # было minx
         else:
-            extended_line = LineString([a, (a.x, maxy)])
+            extended_line = LineString([a, (a.x, maxy)])  # было maxy
     elif a.y == b.y:  # horizonthal line
         if a.x <= b.x:
             extended_line = LineString([a, (minx, a.y)])

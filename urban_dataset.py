@@ -328,6 +328,13 @@ class UrbanGraphDataset(Dataset):
                         long_side=long_side, b_shape=b_shape, b_iou=b_iou, 
                         blockshape_latent = blockshape_latent, block_scale = block_scale, block_condition = block_condition,
                         org_binary_mask = self.base_transform(block_mask))
+        zid = tmp_graph.graph.get('zone_id', None)
+        zoh = tmp_graph.graph.get('zone_onehot', None)
+        if zid is not None:
+            data.zone_id = int(zid)
+        if zoh is not None:
+            data.zone_onehot = torch.tensor(np.asarray(zoh), dtype=torch.float32)
+
         return data
 
 

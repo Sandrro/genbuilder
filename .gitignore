@@ -1,0 +1,7 @@
+__pycache__
+data
+*dataset
+logs
+epoch
+tensorboard
+test
