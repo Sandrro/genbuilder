@@ -1,6 +1,8 @@
 import os
 import glob
 import subprocess
+import json
+import tempfile
 
 import shutil
 from typing import List
@@ -9,6 +11,8 @@ from fastapi.responses import FileResponse
 
 from pydantic import BaseModel
 import logging
+
+from inference import infer_from_geojson
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
@@ -88,6 +92,33 @@ def start_train(req: TrainRequest):
         cmd += ["--hf_token", req.hf_token]
     _launch(cmd)
     return {"status": "started"}
+
+
+@app.post("/infer")
+async def infer_block(file: UploadFile = File(...)):
+    """Generate building footprints for a block polygon.
+
+    The uploaded file must contain a GeoJSON FeatureCollection with the block
+    polygon. The response is a GeoJSON file with generated building polygons in
+    the same CRS as the input.
+    """
+    raw = await file.read()
+    try:
+        geojson = json.loads(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid GeoJSON")
+
+    try:
+        result = infer_from_geojson(geojson)
+    except Exception as e:  # pragma: no cover - safe guard
+        raise HTTPException(status_code=400, detail=str(e))
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".geojson") as tmp:
+        json.dump(result, tmp)
+        tmp_path = tmp.name
+
+    logging.info("Inference produced %d buildings", len(result.get("features", [])))
+    return FileResponse(tmp_path, media_type="application/geo+json", filename="buildings.geojson")
 
 @app.post("/test")
 def start_test(req: TestRequest):
