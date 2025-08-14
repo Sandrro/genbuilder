@@ -44,8 +44,8 @@ mpmath
 multidict
 namex
 networkx
-# ВАЖНО: numpy НЕ указываем, чтобы не перебить conda-пакет от базового образа
-opencv-python-headless
+numpy<2  # ensure compatibility with binaries compiled against NumPy 1.x
+opencv-python-headless<4.12  # pin version compatible with NumPy 1.x
 opt_einsum
 optree
 packaging
