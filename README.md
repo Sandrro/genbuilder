@@ -93,6 +93,8 @@ Use the `data_to_hf.py` script to upload processed graphs to a HuggingFace datas
 
 ```bash
 python data_to_hf.py --repo <user/dataset> --token <hf_token>
+# for large datasets
+python data_to_hf.py --repo <user/dataset> --token <hf_token> --large
 ```
 
 During training or testing the data can be downloaded automatically by providing the repository to `run_pipeline.py` (or via the API's `dataset_repo` field). After training, the best checkpoint and its log file can be pushed to a HuggingFace model repository using `--upload_repo` and later restored for evaluation with `--model_repo`.
