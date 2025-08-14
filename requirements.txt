@@ -1,3 +1,4 @@
+# базовые утилиты
 Jinja2
 Markdown
 MarkupSafe
@@ -35,7 +36,6 @@ joblib
 keras
 kiwisolver
 lazy_loader
-libclang
 markdown-it-py
 matplotlib
 mdurl
@@ -44,27 +44,12 @@ mpmath
 multidict
 namex
 networkx
-numpy
-nvidia-cublas-cu12
-nvidia-cuda-cupti-cu12
-nvidia-cuda-nvrtc-cu12
-nvidia-cuda-runtime-cu12
-nvidia-cudnn-cu12
-nvidia-cufft-cu12
-nvidia-cufile-cu12
-nvidia-curand-cu12
-nvidia-cusolver-cu12
-nvidia-cusparse-cu12
-nvidia-cusparselt-cu12
-nvidia-nccl-cu12
-nvidia-nvjitlink-cu12
-nvidia-nvtx-cu12
+# ВАЖНО: numpy НЕ указываем, чтобы не перебить conda-пакет от базового образа
 opencv-python-headless
 opt_einsum
 optree
 packaging
 pandas
-pickle5
 pillow
 propcache
 protobuf
@@ -75,7 +60,6 @@ pyproj
 python-dateutil
 python-multipart
 pytz
-pyyaml
 requests
 rich
 scikit-image
@@ -84,23 +68,14 @@ scipy
 seaborn
 shapely
 six
-skgeom
 sympy
 tensorboard
 tensorboard-data-server
 tensorboard-logger
-tensorflow
-tensorflow-io-gcs-filesystem
 termcolor
 threadpoolctl
 tifffile
-torch
-torch-geometric
-torch_scatter
-torch_sparse
-torchvision
 tqdm
-triton
 typing_extensions
 tzdata
 urllib3
