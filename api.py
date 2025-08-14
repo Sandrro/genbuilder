@@ -5,8 +5,12 @@ import subprocess
 import shutil
 from typing import List
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 
 from pydantic import BaseModel
+import logging
+
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 app = FastAPI()
 
@@ -36,6 +40,7 @@ async def upload_data(files: List[UploadFile] = File(...)):
     saved: list[str] = []
     for file in files:
         fname = file.filename
+        logging.info("Receiving data file %s", fname)
         if fname.endswith(".gpickle"):
             target = os.path.join(dest_proc, fname)
             with open(target, "wb") as f:
@@ -56,16 +61,19 @@ async def upload_config(file: UploadFile = File(...)):
     fname = file.filename or "train_gnn.yaml"
     if not fname.endswith(".yaml"):
         raise HTTPException(status_code=400, detail="only .yaml files supported")
+    logging.info("Uploading config %s", fname)
     with open(fname, "wb") as f:
         shutil.copyfileobj(file.file, f)
     return {"saved": fname}
 
 def _launch(cmd: list[str]):
     """Run command in background without blocking the API."""
+    logging.info("Launching command: %s", " ".join(cmd))
     subprocess.Popen(cmd)
 
 @app.post("/train")
 def start_train(req: TrainRequest):
+    logging.info("Train request: %s", req)
     cmd = [
         "python", "run_pipeline.py",
         "--config", req.config,
@@ -83,6 +91,7 @@ def start_train(req: TrainRequest):
 
 @app.post("/test")
 def start_test(req: TestRequest):
+    logging.info("Test request: %s", req)
     cmd = [
         "python", "run_pipeline.py",
         "--config", req.config,
@@ -113,6 +122,14 @@ def read_log(name: str):
         raise HTTPException(status_code=404, detail="log not found")
     with open(path, "r", encoding="utf-8") as f:
         return {"log": f.read()}
+
+@app.get("/logs/{name}/download")
+def download_log(name: str):
+    path = os.path.join("logs", name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="log not found")
+    logging.info("Serving log file %s", name)
+    return FileResponse(path, media_type="text/plain", filename=name)
 
 @app.get("/")
 def root():

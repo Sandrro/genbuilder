@@ -3,13 +3,19 @@ import os
 import glob
 import argparse
 import subprocess
+import logging
 from huggingface_hub import HfApi, snapshot_download
+
+
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 
 def run(cmd, env):
     """Run a subprocess and forward output."""
+    logging.info("Running command: %s", " ".join(cmd))
     proc = subprocess.Popen(cmd, env=env)
     proc.communicate()
+    logging.info("Command finished with code %s", proc.returncode)
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, cmd)
 
@@ -26,6 +32,7 @@ def main():
     parser.add_argument("--upload_repo", default=None, help="HuggingFace repo id to upload model and logs")
     parser.add_argument("--hf_token", default=None, help="HuggingFace token")
     args = parser.parse_args()
+    logging.info("Arguments: %s", args)
 
     env = os.environ.copy()
     env["DATASET_ROOT"] = os.path.abspath(args.dataset)
@@ -34,6 +41,7 @@ def main():
         env["EPOCH_NAME"] = args.epoch
 
     if args.dataset_repo:
+        logging.info("Downloading dataset from %s", args.dataset_repo)
         snapshot_download(
             repo_id=args.dataset_repo,
             repo_type="dataset",
@@ -42,6 +50,7 @@ def main():
         )
 
     if args.model_repo:
+        logging.info("Downloading model from %s", args.model_repo)
         model_dir = os.path.join("epoch", args.model_repo.split("/")[-1])
         snapshot_download(
             repo_id=args.model_repo,
@@ -54,6 +63,7 @@ def main():
     latest_epoch = None
 
     if args.train:
+        logging.info("Starting training stage")
         run(["python", "train.py"], env=env)
         epoch_dirs = glob.glob(os.path.join(os.getcwd(), "epoch", "*"))
         if epoch_dirs and not args.epoch:
@@ -66,6 +76,7 @@ def main():
             if epoch_dirs:
                 latest_epoch = max(epoch_dirs, key=os.path.getmtime)
                 env["EPOCH_NAME"] = os.path.basename(latest_epoch)
+        logging.info("Starting testing stage")
         run(["python", "test.py"], env=env)
 
     if args.upload_repo:
@@ -74,6 +85,7 @@ def main():
             if epoch_dirs:
                 latest_epoch = max(epoch_dirs, key=os.path.getmtime)
         if latest_epoch:
+            logging.info("Preparing to upload artifacts from %s", latest_epoch)
             files = []
             best_ckpt = os.path.join(latest_epoch, "val_best_extacc.pth")
             if os.path.isfile(best_ckpt):
@@ -100,9 +112,9 @@ def main():
                         repo_type="model",
                         token=args.hf_token,
                     )
-                    print(f"Uploaded {fp} to {args.upload_repo}")
+                    logging.info("Uploaded %s to %s", fp, args.upload_repo)
             else:
-                print("No artifacts found to upload")
+                logging.info("No artifacts found to upload")
 
 
 if __name__ == "__main__":

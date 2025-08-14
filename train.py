@@ -121,10 +121,12 @@ if __name__ == "__main__":
         "DATASET_ROOT",
         os.path.join(root, train_opt.get("dataset_root", "dataset")),
     )
+    logging.info("Dataset root: %s", dataset_path)
 
     # NEW: make sure gpickles are sequentially named before dataset loads them
     _ensure_sequential_gpickles(dataset_path)
     print(train_opt)
+    logging.debug("Training options: %s", train_opt)
     is_resmue = train_opt['resume']
     gpu_ids = train_opt['gpu_ids']
 
@@ -158,6 +160,7 @@ if __name__ == "__main__":
 
     device = torch.device('cuda:{}'.format(gpu_ids[0]))
     print(device)
+    logging.info("Using device %s", device)
     opt['device'] = str(device)
     start_epoch = opt['start_epoch']
 
@@ -192,9 +195,14 @@ if __name__ == "__main__":
         for handler in logging.root.handlers[:]:
             logging.root.removeHandler(handler)
         logging.basicConfig(
-            level=logging.INFO,
+            level=logging.DEBUG,
             format="[%(levelname)s] %(message)s - %(filename)s %(funcName)s %(asctime)s ",
-            filename=log_file)
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler()
+            ]
+        )
+        logging.info("Logging to %s", log_file)
         opt['save_path'] = save_pth
         opt['log_path'] = log_file
         opt['tensorboard_path'] = tb_path

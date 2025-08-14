@@ -11,6 +11,9 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from typing import Optional
 from collections import defaultdict
+import logging
+
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 """
 Test script with zoning condition support (compatible with original repo outputs).
@@ -179,6 +182,8 @@ if __name__ == "__main__":
     dataset_path = os.environ.get('DATASET_ROOT', os.path.join(root, 'dataset'))
     epoch_name = os.environ.get('EPOCH_NAME')
     data_name = 'osm_cities'
+    logging.info("Dataset root: %s", dataset_path)
+    logging.info("Requested checkpoint: %s", pth_name)
 
     if epoch_name is None:
         epoch_root = os.path.join(root, 'epoch')
@@ -186,6 +191,7 @@ if __name__ == "__main__":
         if not candidates:
             raise RuntimeError('No epoch directory found. Set EPOCH_NAME env var.')
         epoch_name = max(candidates, key=lambda d: os.path.getmtime(os.path.join(epoch_root, d)))
+    logging.info("Using epoch directory: %s", epoch_name)
 
     gpu_ids = 0
     batch_size = 1
@@ -250,6 +256,7 @@ if __name__ == "__main__":
 
     # === Load checkpoint and choose best-fitting model automatically ===
     ckpt_path = os.path.join(test_yaml, pth_name + ".pth")
+    logging.info("Loading checkpoint from %s", ckpt_path)
     state = torch.load(ckpt_path, map_location='cpu')
 
     latent_ch = int(opt.get('n_ft_dim', 256))
