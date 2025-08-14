@@ -4,7 +4,7 @@ services:
     build: .
     gpus: all
     ports:
-      - "8000:8000"
+      - "8005:8000"
     volumes:
       - ./train_gnn.yaml:/app/train_gnn.yaml
       - ./epoch:/app/epoch

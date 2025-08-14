@@ -4,5 +4,4 @@ epoch
 tensorboard
 # Ignore everything under my_dataset except processed subfolder
 my_dataset/*
-!my_dataset/processed
-!my_dataset/processed/**
+!my_dataset/_zones_map.json

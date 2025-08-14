@@ -264,8 +264,8 @@ if __name__ == "__main__":
 
     val_dataset = dataset[val_idx]
     train_dataset = dataset[train_idx]
-    val_loader = DataLoader(val_dataset, batch_size=opt['batch_size'], shuffle=False, num_workers=8)
-    train_loader = DataLoader(train_dataset, batch_size=opt['batch_size'], shuffle=True, num_workers=8)
+    val_loader = DataLoader(val_dataset, batch_size=opt['batch_size'], shuffle=False, num_workers=1)
+    train_loader = DataLoader(train_dataset, batch_size=opt['batch_size'], shuffle=True, num_workers=1)
 
     if opt['is_blockplanner']:
         model = NaiveBlockGenerator(opt, N=N)
