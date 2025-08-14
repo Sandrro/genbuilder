@@ -71,7 +71,6 @@ six
 sympy
 tensorboard
 tensorboard-data-server
-tensorboard-logger
 termcolor
 threadpoolctl
 tifffile

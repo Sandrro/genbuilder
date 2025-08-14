@@ -37,5 +37,7 @@ RUN grep -Evi '^(skgeom|torch_scatter|torch_sparse|torch-geometric|torch-scatter
     find /opt/conda -name '__pycache__' -type d -exec rm -rf {} +
 
 COPY . .
+# Ensure processed dataset is bundled into the image
+COPY my_dataset/processed ./my_dataset/processed
 EXPOSE 8000 6006
 ENTRYPOINT ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
