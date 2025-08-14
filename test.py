@@ -10,6 +10,7 @@ from torchvision.utils import save_image
 import matplotlib.pyplot as plt
 import networkx as nx
 from typing import Optional
+from collections import defaultdict
 
 """
 Test script with zoning condition support (compatible with original repo outputs).
@@ -271,8 +272,35 @@ if __name__ == "__main__":
         val_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
         print('Get {} graph for teaser testing.'.format(val_idx.shape[0]))
     else:
-        val_num = int(num_data * opt['val_ratio'])
-        val_idx = np.array(random.sample(range(num_data), val_num))
+        labels = []
+        have_labels = True
+        try:
+            for i in range(num_data):
+                z = getattr(dataset[i], 'zone_id', None)
+                if z is None:
+                    have_labels = False
+                    break
+                labels.append(int(z))
+        except Exception:
+            have_labels = False
+
+        if have_labels and len(set(labels)) > 1:
+            rng = np.random.RandomState(42)
+            by_cls = defaultdict(list)
+            for idx, c in enumerate(labels):
+                by_cls[c].append(idx)
+            val_idx = []
+            for c, idxs in by_cls.items():
+                idxs = np.array(idxs)
+                rng.shuffle(idxs)
+                k = max(1, int(round(len(idxs) * opt['val_ratio'])))
+                val_idx.extend(idxs[:k].tolist())
+            val_idx = np.array(sorted(set(val_idx)))
+            print('[split] Stratified by zone_id')
+        else:
+            val_num = int(num_data * opt['val_ratio'])
+            val_idx = np.array(random.sample(range(num_data), val_num))
+            print('[split] Random split')
         print('Get {} graph for validation'.format(val_idx.shape[0]))
         val_dataset = dataset[val_idx]
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)

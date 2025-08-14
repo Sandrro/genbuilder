@@ -43,9 +43,9 @@ evaluation.
 
    The service listens on `http://localhost:8000`.
 
-3. **Upload dataset files**
+3. **Upload dataset files (optional)**
 
-   Upload multiple `.gpickle` files and (optionally) `_zones_map.json` before training:
+   You can still upload multiple `.gpickle` files and (optionally) `_zones_map.json` before training:
 
    ```bash
    curl -X POST http://localhost:8000/data \
@@ -54,23 +54,30 @@ evaluation.
         -F "files=@my_dataset/processed/_zones_map.json"
    ```
 
-4. **Start training**
+4. **Upload training config**
+
+   ```bash
+   curl -X POST http://localhost:8000/config \
+        -F "file=@train_gnn.yaml"
+   ```
+
+5. **Start training**
 
    ```bash
    curl -X POST http://localhost:8000/train \
         -H 'Content-Type: application/json' \
-        -d '{"dataset":"my_dataset","config":"train_gnn.yaml"}'
+        -d '{"dataset":"my_dataset","dataset_repo":"<hf_dataset_repo>","upload_repo":"<hf_model_repo>","config":"train_gnn.yaml","hf_token":"<token>"}'
    ```
 
-5. **Run evaluation**
+6. **Run evaluation**
 
    ```bash
    curl -X POST http://localhost:8000/test \
         -H 'Content-Type: application/json' \
-        -d '{"dataset":"my_dataset","config":"train_gnn.yaml","epoch":"<epoch_dir>"}'
+        -d '{"dataset":"my_dataset","dataset_repo":"<hf_dataset_repo>","model_repo":"<hf_model_repo>","config":"train_gnn.yaml","hf_token":"<token>"}'
    ```
 
-6. **Inspect logs**
+7. **Inspect logs**
 
    ```bash
    curl http://localhost:8000/logs
@@ -82,13 +89,17 @@ Artifacts and logs are written to the host `epoch/`, `logs/` and
 
 
 ## Dataset
-We provide a 10K dataset sample in the repo. You may directly unzip it ("dataset.tar.gz").
+Use the `data_to_hf.py` script to upload processed graphs to a HuggingFace dataset repository:
 
-The 120K dataset is provided [here](https://purdue0-my.sharepoint.com/:u:/g/personal/he425_purdue_edu/ET2gehuc9BhBhJd_4kIrhbYB0xJNuMDZE6mqVTZd9yDQ3Q?e=AwWMKy)
+```bash
+python data_to_hf.py --repo <user/dataset> --token <hf_token>
+```
 
-"processed" folder contains 10K preprocessed graph-represented city blocks. You may read them by "networkx.read_gpickle()". "raw_geo" contains 10K corresponding original building and block polygons (shapely.polygon format) of each city block (coordinates in UTM Zone projection). You may read it by "pickle.load()". Those original building polygons are directly acquired by "osmnx.geometries module" from [osmnx](https://osmnx.readthedocs.io/en/stable/user-reference.html).
+During training or testing the data can be downloaded automatically by providing the repository to `run_pipeline.py` (or via the API's `dataset_repo` field). After training, the best checkpoint and its log file can be pushed to a HuggingFace model repository using `--upload_repo` and later restored for evaluation with `--model_repo`.
 
-Our canonical spatial transformation converts the original building polygons to the canonical version. After simple normalization by mean substraction and std dividing, coordinates and location information are encoded as node attributes in 2D grid graphs, then saved in "processed". Since the raw dataset is public accessible, we encourage users to implement their own preprocessing of original building polygons. It may facilitate better performance.
+"processed" folder contains preprocessed graph-represented city blocks which can be read by `networkx.read_gpickle()`. `raw_geo` contains corresponding original building and block polygons (shapely.polygon format) of each city block (coordinates in UTM Zone projection) readable by `pickle.load()`.
+
+Our canonical spatial transformation converts the original building polygons to the canonical version. After simple normalization by mean subtraction and std dividing, coordinates and location information are encoded as node attributes in 2D grid graphs, then saved in `processed`. Since the raw dataset is publicly accessible, we encourage users to implement their own preprocessing of original building polygons. It may facilitate better performance.
 
 
 ## How to train your model
