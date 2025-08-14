@@ -3,7 +3,7 @@ import os
 import glob
 import argparse
 import subprocess
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, snapshot_download
 
 
 def run(cmd, env):
@@ -18,10 +18,12 @@ def main():
     parser = argparse.ArgumentParser(description="Utility to train/test and upload models")
     parser.add_argument("--config", default="train_gnn.yaml", help="Path to training YAML")
     parser.add_argument("--dataset", default="my_dataset", help="Path to dataset root")
+    parser.add_argument("--dataset_repo", default=None, help="HuggingFace dataset repo id to download from")
+    parser.add_argument("--model_repo", default=None, help="HuggingFace model repo id to download for testing")
     parser.add_argument("--epoch", default=None, help="Epoch directory name to use for testing")
     parser.add_argument("--train", action="store_true", help="Run training")
     parser.add_argument("--test", action="store_true", help="Run test after training")
-    parser.add_argument("--upload_repo", default=None, help="HuggingFace repo id to upload model")
+    parser.add_argument("--upload_repo", default=None, help="HuggingFace repo id to upload model and logs")
     parser.add_argument("--hf_token", default=None, help="HuggingFace token")
     args = parser.parse_args()
 
@@ -30,6 +32,24 @@ def main():
     env["TRAIN_CONFIG"] = os.path.abspath(args.config)
     if args.epoch:
         env["EPOCH_NAME"] = args.epoch
+
+    if args.dataset_repo:
+        snapshot_download(
+            repo_id=args.dataset_repo,
+            repo_type="dataset",
+            local_dir=args.dataset,
+            token=args.hf_token,
+        )
+
+    if args.model_repo:
+        model_dir = os.path.join("epoch", args.model_repo.split("/")[-1])
+        snapshot_download(
+            repo_id=args.model_repo,
+            repo_type="model",
+            local_dir=model_dir,
+            token=args.hf_token,
+        )
+        env["EPOCH_NAME"] = os.path.basename(model_dir)
 
     latest_epoch = None
 
@@ -54,18 +74,35 @@ def main():
             if epoch_dirs:
                 latest_epoch = max(epoch_dirs, key=os.path.getmtime)
         if latest_epoch:
-            ckpt_path = os.path.join(latest_epoch, "latest.pth")
-            if os.path.isfile(ckpt_path):
+            files = []
+            best_ckpt = os.path.join(latest_epoch, "val_best_extacc.pth")
+            if os.path.isfile(best_ckpt):
+                files.append(best_ckpt)
+            yaml_path = os.path.join(latest_epoch, "train_save.yaml")
+            if not os.path.isfile(yaml_path):
+                alt_yaml = os.path.join(latest_epoch, "resume_train_save.yaml")
+                if os.path.isfile(alt_yaml):
+                    yaml_path = alt_yaml
+                else:
+                    yaml_path = None
+            if yaml_path:
+                files.append(yaml_path)
+            log_file = os.path.join("logs", os.path.basename(latest_epoch) + ".log")
+            if os.path.isfile(log_file):
+                files.append(log_file)
+            if files:
                 api = HfApi()
-                api.upload_file(
-                    path_or_fileobj=ckpt_path,
-                    path_in_repo=os.path.basename(ckpt_path),
-                    repo_id=args.upload_repo,
-                    token=args.hf_token,
-                )
-                print(f"Uploaded {ckpt_path} to {args.upload_repo}")
+                for fp in files:
+                    api.upload_file(
+                        path_or_fileobj=fp,
+                        path_in_repo=os.path.basename(fp),
+                        repo_id=args.upload_repo,
+                        repo_type="model",
+                        token=args.hf_token,
+                    )
+                    print(f"Uploaded {fp} to {args.upload_repo}")
             else:
-                print(f"Checkpoint {ckpt_path} not found, skipping upload")
+                print("No artifacts found to upload")
 
 
 if __name__ == "__main__":

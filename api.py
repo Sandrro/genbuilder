@@ -13,13 +13,17 @@ app = FastAPI()
 class TrainRequest(BaseModel):
     config: str = "train_gnn.yaml"
     dataset: str = "my_dataset"
+    dataset_repo: str | None = None
     upload_repo: str | None = None
     hf_token: str | None = None
 
 class TestRequest(BaseModel):
     config: str = "train_gnn.yaml"
     dataset: str = "my_dataset"
+    dataset_repo: str | None = None
+    model_repo: str | None = None
     epoch: str | None = None
+    hf_token: str | None = None
 
 
 @app.post("/data")
@@ -46,6 +50,16 @@ async def upload_data(files: List[UploadFile] = File(...)):
         saved.append(fname)
     return {"saved": saved}
 
+@app.post("/config")
+async def upload_config(file: UploadFile = File(...)):
+    """Upload training configuration YAML (e.g. train_gnn.yaml)."""
+    fname = file.filename or "train_gnn.yaml"
+    if not fname.endswith(".yaml"):
+        raise HTTPException(status_code=400, detail="only .yaml files supported")
+    with open(fname, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return {"saved": fname}
+
 def _launch(cmd: list[str]):
     """Run command in background without blocking the API."""
     subprocess.Popen(cmd)
@@ -58,6 +72,8 @@ def start_train(req: TrainRequest):
         "--dataset", req.dataset,
         "--train",
     ]
+    if req.dataset_repo:
+        cmd += ["--dataset_repo", req.dataset_repo]
     if req.upload_repo:
         cmd += ["--upload_repo", req.upload_repo]
     if req.hf_token:
@@ -73,8 +89,14 @@ def start_test(req: TestRequest):
         "--dataset", req.dataset,
         "--test",
     ]
+    if req.dataset_repo:
+        cmd += ["--dataset_repo", req.dataset_repo]
+    if req.model_repo:
+        cmd += ["--model_repo", req.model_repo]
     if req.epoch:
         cmd += ["--epoch", req.epoch]
+    if req.hf_token:
+        cmd += ["--hf_token", req.hf_token]
     _launch(cmd)
     return {"status": "started"}
 
