@@ -150,12 +150,15 @@ class BlockGenerator(nn.Module):
         x = self.ex_init(x)
         one_hot = self._one_hot_nodes(B)
 
-        if self.use_cond and cond is not None:
-            node_cond = cond[data.batch] if hasattr(data, 'batch') else cond.repeat(x.size(0), 1)
-            cond_emb = self.cond_proj(node_cond)
-            x = torch.cat([x, one_hot, cond_emb], 1)
-        else:
-            x = torch.cat([x, one_hot], 1)
+        x = torch.cat([x, one_hot], 1)
+        if self.use_cond:
+            if cond is not None:
+                node_cond = cond[data.batch] if hasattr(data, 'batch') else cond.repeat(x.size(0), 1)
+                cond_emb = self.cond_proj(node_cond)
+            else:
+                cond_emb = torch.zeros(x.size(0), self.latent_ch // 2, device=self.device)
+            x = torch.cat([x, cond_emb], 1)
+
         ft = F.relu(self.ft_init(x))
 
         n0 = torch.cat((shape_feature, size, pos, ft), 1)
@@ -314,12 +317,15 @@ class AttentionBlockGenerator_independent(AttentionBlockGenerator):
         x = self.ex_init(x)
         one_hot = self._one_hot_nodes(B)
 
-        if self.use_cond and cond is not None:
-            node_cond = cond[data.batch] if hasattr(data, 'batch') else cond.repeat(x.size(0), 1)
-            cond_emb = self.cond_proj(node_cond)
-            x = torch.cat([x, one_hot, cond_emb], 1)
-        else:
-            x = torch.cat([x, one_hot], 1)
+        x = torch.cat([x, one_hot], 1)
+        if self.use_cond:
+            if cond is not None:
+                node_cond = cond[data.batch] if hasattr(data, 'batch') else cond.repeat(x.size(0), 1)
+                cond_emb = self.cond_proj(node_cond)
+            else:
+                cond_emb = torch.zeros(x.size(0), self.latent_ch // 2, device=self.device)
+            x = torch.cat([x, cond_emb], 1)
+
         ft = F.relu(self.ft_init(x))
 
         n0 = torch.cat((shape_feature, size, pos, ft), 1)
