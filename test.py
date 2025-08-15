@@ -1,7 +1,7 @@
 import os, pickle, random, shutil, json
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
 from torch_geometric.loader import DataLoader
 from urban_dataset import UrbanGraphDataset, graph_transform, get_transform, test_graph_transform
 from model import *
