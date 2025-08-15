@@ -18,6 +18,7 @@ RUN python -m pip install --upgrade pip \
  && pip install --no-cache-dir "setuptools<70" wheel "pybind11==2.10.4"
 
 # 3) Ставим skgeom без build isolation, чтобы использовались заголовки pybind11==2.10.4
+
 RUN pip install --no-cache-dir --no-build-isolation \
       https://github.com/scikit-geometry/scikit-geometry/archive/refs/tags/0.1.2.tar.gz
 
