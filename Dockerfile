@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.1.0-cuda11.8-cudnn8-runtime
+FROM pytorch/pytorch:2.4.0-cuda11.8-cudnn8-runtime
 
 SHELL ["/bin/bash","-lc"]
 ENV PATH=/opt/conda/bin:$PATH
@@ -21,8 +21,8 @@ RUN python -m pip install --upgrade pip \
 RUN pip install --no-cache-dir --no-build-isolation \
       https://github.com/scikit-geometry/scikit-geometry/archive/refs/tags/0.1.2.tar.gz
 
-# 4) PyG под torch 2.1.0 + cu118
-ARG TORCH=2.1.0
+# 4) PyG под torch 2.4.0 + cu118
+ARG TORCH=2.4.0
 ARG CUDA=cu118
 RUN pip install --no-cache-dir \
       torch-scatter -f https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html && \
