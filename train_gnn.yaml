@@ -36,7 +36,6 @@ batch_size : 200
 latent_dim: 512
 template_width : 30
 template_height : 4
-dataset_root: my_dataset
 
 
 ################################    weight setting  #########################################################
