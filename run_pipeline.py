@@ -56,35 +56,24 @@ def main():
     parser.add_argument("--test", action="store_true", help="Run test after training")
     parser.add_argument("--upload_repo", default=None, help="HuggingFace repo id to upload model and logs")
     parser.add_argument("--hf_token", default=None, help="HuggingFace token")
-    parser.add_argument("--trial", action="store_true", help="Use only first 100 graphs for quick debug run")
     args = parser.parse_args()
     logging.info("Arguments: %s", args)
 
     env = os.environ.copy()
     env["DATASET_ROOT"] = os.path.abspath(args.dataset)
     env["TRAIN_CONFIG"] = os.path.abspath(args.config)
-    if args.trial:
-        env["TRAIN_TRIAL"] = "1"
     if args.epoch:
         env["EPOCH_NAME"] = args.epoch
 
     if args.dataset_repo:
         logging.info("Downloading dataset from %s", args.dataset_repo)
-        dl_kwargs = {
-            "repo_id": args.dataset_repo,
-            "repo_type": "dataset",
-            "local_dir": args.dataset,
-            "token": args.hf_token,
-        }
-        if args.trial:
-            # In trial mode avoid downloading the full dataset. Keep only the
-            # first 100 processed graphs (and raw graphs if present) by
-            # skipping files whose index has three or more digits (>=100).
-            dl_kwargs["ignore_patterns"] = [
-                "processed/[0-9][0-9][0-9]*.gpickle",
-                "raw/[0-9][0-9][0-9]*.gpickle",
-            ]
-        _download_with_retries(snapshot_download, **dl_kwargs)
+        _download_with_retries(
+            snapshot_download,
+            repo_id=args.dataset_repo,
+            repo_type="dataset",
+            local_dir=args.dataset,
+            token=args.hf_token,
+        )
 
     if args.model_repo:
         logging.info("Downloading model from %s", args.model_repo)
