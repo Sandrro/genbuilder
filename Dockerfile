@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.4.0-cuda11.8-cudnn8-runtime
+FROM pytorch/pytorch:2.4.1-cuda11.8-cudnn9-runtime
 
 SHELL ["/bin/bash","-lc"]
 ENV PATH=/opt/conda/bin:$PATH
@@ -12,12 +12,14 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
       libgmp-dev libmpfr-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# 2) Зафиксировать инструментальную цепочку и СТАРЫЙ pybind11
+# 2) Современная связка для Python 3.11
 ENV CMAKE_BUILD_PARALLEL_LEVEL=4
 RUN python -m pip install --upgrade pip \
- && pip install --no-cache-dir "setuptools<70" wheel "pybind11==2.6.2"
+ && pip install --no-cache-dir "setuptools<70" wheel \
+ && pip install --no-cache-dir "pybind11>=2.11,<2.13"
 
-# 3) Ставим skgeom без build isolation, чтобы использовались заголовки pybind11==2.6.2
+# 3) Ставим skgeom (можно с PEP517 или без изоляции — нам главное, чтобы взялся новый pybind11)
+# Вариант А: без изоляции
 RUN pip install --no-cache-dir --no-build-isolation \
       https://github.com/scikit-geometry/scikit-geometry/archive/refs/tags/0.1.2.tar.gz
 
