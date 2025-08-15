@@ -12,14 +12,13 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
       libgmp-dev libmpfr-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# 2) Современная связка для Python 3.11
+# 2) Зафиксировать инструментальную цепочку и pybind11, совместимый со skgeom
 ENV CMAKE_BUILD_PARALLEL_LEVEL=4
 RUN python -m pip install --upgrade pip \
- && pip install --no-cache-dir "setuptools<70" wheel \
- && pip install --no-cache-dir "pybind11>=2.11,<2.13"
+ && pip install --no-cache-dir "setuptools<70" wheel "pybind11==2.10.4"
 
-# 3) Ставим skgeom (можно с PEP517 или без изоляции — нам главное, чтобы взялся новый pybind11)
-# Вариант А: без изоляции
+# 3) Ставим skgeom без build isolation, чтобы использовались заголовки pybind11==2.10.4
+
 RUN pip install --no-cache-dir --no-build-isolation \
       https://github.com/scikit-geometry/scikit-geometry/archive/refs/tags/0.1.2.tar.gz
 
