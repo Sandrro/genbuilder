@@ -31,12 +31,15 @@ def main():
     parser.add_argument("--test", action="store_true", help="Run test after training")
     parser.add_argument("--upload_repo", default=None, help="HuggingFace repo id to upload model and logs")
     parser.add_argument("--hf_token", default=None, help="HuggingFace token")
+    parser.add_argument("--trial", action="store_true", help="Use only first 100 graphs for quick debug run")
     args = parser.parse_args()
     logging.info("Arguments: %s", args)
 
     env = os.environ.copy()
     env["DATASET_ROOT"] = os.path.abspath(args.dataset)
     env["TRAIN_CONFIG"] = os.path.abspath(args.config)
+    if args.trial:
+        env["TRAIN_TRIAL"] = "1"
     if args.epoch:
         env["EPOCH_NAME"] = args.epoch
 

@@ -6,10 +6,10 @@ import random
 import logging
 from time import gmtime, strftime
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 from torch.optim.lr_scheduler import MultiStepLR
 from torch_geometric.data import Data, Batch
 from torch_geometric.loader import DataLoader, DataListLoader
@@ -220,6 +220,10 @@ if __name__ == "__main__":
     cnn_transform = get_transform(noise_range=10.0, noise_type='gaussian', isaug=False, rescale_size=64)
     dataset = UrbanGraphDataset(dataset_path, transform=graph_transform, cnn_transform=cnn_transform)
     num_data = len(dataset)
+    if os.environ.get("TRAIN_TRIAL"):
+        num_data = min(100, num_data)
+        logging.info("Trial run enabled, using first %d graphs", num_data)
+        print(f"[trial] using first {num_data} graphs")
     opt['num_data'] = int(num_data)
     print(num_data)
 

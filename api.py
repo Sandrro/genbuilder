@@ -24,6 +24,7 @@ class TrainRequest(BaseModel):
     dataset_repo: str | None = None
     upload_repo: str | None = None
     hf_token: str | None = None
+    trial: bool = False
 
 class TestRequest(BaseModel):
     config: str = "train_gnn.yaml"
@@ -90,6 +91,8 @@ def start_train(req: TrainRequest):
         cmd += ["--upload_repo", req.upload_repo]
     if req.hf_token:
         cmd += ["--hf_token", req.hf_token]
+    if req.trial:
+        cmd += ["--trial"]
     _launch(cmd)
     return {"status": "started"}
 
