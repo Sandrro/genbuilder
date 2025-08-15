@@ -45,12 +45,21 @@ def main():
 
     if args.dataset_repo:
         logging.info("Downloading dataset from %s", args.dataset_repo)
-        snapshot_download(
-            repo_id=args.dataset_repo,
-            repo_type="dataset",
-            local_dir=args.dataset,
-            token=args.hf_token,
-        )
+        dl_kwargs = {
+            "repo_id": args.dataset_repo,
+            "repo_type": "dataset",
+            "local_dir": args.dataset,
+            "token": args.hf_token,
+        }
+        if args.trial:
+            # In trial mode avoid downloading the full dataset. Keep only the
+            # first 100 processed graphs (and raw graphs if present) by
+            # skipping files whose index has three or more digits (>=100).
+            dl_kwargs["ignore_patterns"] = [
+                "processed/[0-9][0-9][0-9]*.gpickle",
+                "raw/[0-9][0-9][0-9]*.gpickle",
+            ]
+        snapshot_download(**dl_kwargs)
 
     if args.model_repo:
         logging.info("Downloading model from %s", args.model_repo)
