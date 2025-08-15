@@ -4,10 +4,35 @@ import glob
 import argparse
 import subprocess
 import logging
+import time
+from typing import Callable
 from huggingface_hub import HfApi, snapshot_download
 
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+
+
+def _download_with_retries(fn: Callable, max_attempts: int = 3, backoff: float = 2.0, **kwargs):
+    """Wrapper around snapshot_download that retries on failure.
+
+    HuggingFace's backend occasionally drops TLS connections which raises
+    transient SSLErrors. Retrying sequentially mitigates the problem.
+
+    Args:
+        fn: download function (e.g. ``snapshot_download``).
+        max_attempts: number of attempts before giving up.
+        backoff: base backoff in seconds, exponentially increased after each try.
+        **kwargs: forwarded to the download function.
+    """
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return fn(max_workers=1, **kwargs)
+        except Exception as exc:  # broad catch to cover network-layer issues
+            logging.warning("Download attempt %d/%d failed: %s", attempt, max_attempts, exc)
+            if attempt == max_attempts:
+                raise
+            time.sleep(backoff ** attempt)
 
 
 def run(cmd, env):
@@ -59,12 +84,13 @@ def main():
                 "processed/[0-9][0-9][0-9]*.gpickle",
                 "raw/[0-9][0-9][0-9]*.gpickle",
             ]
-        snapshot_download(**dl_kwargs)
+        _download_with_retries(snapshot_download, **dl_kwargs)
 
     if args.model_repo:
         logging.info("Downloading model from %s", args.model_repo)
         model_dir = os.path.join("epoch", args.model_repo.split("/")[-1])
-        snapshot_download(
+        _download_with_retries(
+            snapshot_download,
             repo_id=args.model_repo,
             repo_type="model",
             local_dir=model_dir,
