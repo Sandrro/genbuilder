@@ -279,6 +279,25 @@ class UrbanGraphDataset(Dataset):
         self.base_transform = transforms.Compose([transforms.ToTensor()])
 
     @property
+    def raw_dir(self):
+        """Return the directory containing the dataset files.
+
+        The training pipeline now passes the exact folder where the processed
+        `.gpickle` files reside. The default :class:`~torch_geometric.data.Dataset`
+        behaviour appends ``raw`` to the root directory, which results in paths
+        like ``<root>/raw`` and ``<root>/processed``. To respect the directory
+        provided by the user, we override ``raw_dir`` and ``processed_dir`` to
+        point directly to ``self.root_data_path`` without adding any
+        subdirectories.
+        """
+
+        return self.root_data_path
+
+    @property
+    def processed_dir(self):
+        return self.root_data_path
+
+    @property
     def raw_file_names(self):
         raw_graph_dir = []
         for root, _, fnames in sorted(os.walk(self.raw_dir)):
