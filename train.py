@@ -222,6 +222,11 @@ if __name__ == "__main__":
     num_data = len(dataset)
     opt['num_data'] = int(num_data)
     print(num_data)
+    if num_data == 0:
+        raise RuntimeError(
+            f"No graph data found in '{dataset_path}'. "
+            "Please ensure the dataset contains processed .gpickle files."
+        )
 
     # === NEW: stratified split by zone_id if present ===
     labels = []
@@ -248,14 +253,14 @@ if __name__ == "__main__":
             rng.shuffle(idxs)
             k = max(1, int(round(len(idxs) * opt['val_ratio'])))
             val_idx.extend(idxs[:k].tolist())
-        val_idx = np.array(sorted(set(val_idx)))
+        val_idx = np.array(sorted(set(val_idx)), dtype=np.int64)
         train_mask = np.ones(num_data, dtype=bool)
         train_mask[val_idx] = False
         train_idx = np.arange(num_data)[train_mask]
         print('[split] Stratified by zone_id')
     else:
         val_num = int(num_data * opt['val_ratio'])
-        val_idx = np.array(random.sample(range(num_data), val_num))
+        val_idx = np.array(random.sample(range(num_data), val_num), dtype=np.int64)
         train_idx = np.delete(np.arange(num_data), val_idx)
         print('[split] Random split')
 
