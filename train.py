@@ -44,10 +44,10 @@ def _natural_key(name: str):
     return [int(s) if s.isdigit() else s for s in re.split(r'(\d+)', name)]
 
 
-def _ensure_sequential_gpickles(dataset_root: str) -> None:
+def _ensure_sequential_arrows(dataset_root: str) -> None:
     """
-    Ensure all .gpickle files in <dataset_root>/processed (fallback to <dataset_root>)
-    are named sequentially as 0.gpickle, 1.gpickle, ... in a stable, deterministic
+    Ensure all .arrow files in <dataset_root>/processed (fallback to <dataset_root>)
+    are named sequentially as 0.arrow, 1.arrow, ... in a stable, deterministic
     order (natural sort by filename). Writes a mapping file '_file_index_map.json'.
     Two-phase rename avoids collisions.
     """
@@ -57,7 +57,7 @@ def _ensure_sequential_gpickles(dataset_root: str) -> None:
     if not os.path.isdir(processed_dir):
         return
 
-    files = [f for f in os.listdir(processed_dir) if f.endswith('.gpickle')]
+    files = [f for f in os.listdir(processed_dir) if f.endswith('.arrow')]
     if not files:
         return
 
@@ -79,14 +79,14 @@ def _ensure_sequential_gpickles(dataset_root: str) -> None:
 
     for i, fname in enumerate(files_sorted):
         src = os.path.join(processed_dir, fname)
-        tmp = os.path.join(processed_dir, f".__ren_{rnd}_{i}__.gpickle")
+        tmp = os.path.join(processed_dir, f".__ren_{rnd}_{i}__.arrow")
         os.replace(src, tmp)
         tmp_names.append(tmp)
         orig_to_tmp[fname] = os.path.basename(tmp)
 
     mapping = {}
     for i, tmp in enumerate(tmp_names):
-        dst = os.path.join(processed_dir, f"{i}.gpickle")
+        dst = os.path.join(processed_dir, f"{i}.arrow")
         os.replace(tmp, dst)
         # Find original name for this tmp
         orig = None
@@ -94,7 +94,7 @@ def _ensure_sequential_gpickles(dataset_root: str) -> None:
             if v == os.path.basename(tmp):
                 orig = k
                 break
-        mapping[orig] = f"{i}.gpickle"
+        mapping[orig] = f"{i}.arrow"
 
     # Persist mapping for traceability
     map_path = os.path.join(processed_dir, '_file_index_map.json')
@@ -123,8 +123,8 @@ if __name__ == "__main__":
     )
     logging.info("Dataset root: %s", dataset_path)
 
-    # NEW: make sure gpickles are sequentially named before dataset loads them
-    _ensure_sequential_gpickles(dataset_path)
+    # Ensure arrow files are sequentially named before dataset loads them
+    _ensure_sequential_arrows(dataset_path)
     print(train_opt)
     logging.debug("Training options: %s", train_opt)
     is_resmue = train_opt['resume']
@@ -225,7 +225,7 @@ if __name__ == "__main__":
     if num_data == 0:
         raise RuntimeError(
             f"No graph data found in '{dataset_path}'. "
-            "Please ensure the dataset contains processed .gpickle files."
+            "Please ensure the dataset contains processed .arrow files."
         )
 
     # === NEW: stratified split by zone_id if present ===

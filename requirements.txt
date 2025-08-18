@@ -16,6 +16,7 @@ certifi
 charset-normalizer
 contourpy
 cycler
+datasets
 fastapi
 filelock
 flatbuffers
@@ -43,8 +44,8 @@ ml_dtypes
 mpmath
 multidict
 namex
-networkx>=3.3  # for gpickle management and NumPy 2 support
-numpy>=2.0  # required for gpickles generated with NumPy 2.x
+networkx>=3.3  # for graph serialization and NumPy 2 support
+numpy>=2.0  # required for graphs generated with NumPy 2.x
 opencv-python-headless>=4.10  # ensure compatibility with NumPy 2.x
 opt_einsum
 optree
@@ -54,6 +55,7 @@ pillow>=10.0  # linked against NumPy 2
 propcache
 protobuf
 psutil
+pyarrow
 pyogrio
 pyparsing
 pyproj

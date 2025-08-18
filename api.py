@@ -36,7 +36,7 @@ class TestRequest(BaseModel):
 
 @app.post("/data")
 async def upload_data(files: List[UploadFile] = File(...)):
-    """Upload .gpickle files (multiple) and optional _zones_map.json."""
+    """Upload .arrow files (multiple) and optional _zones_map.json."""
     dest_proc = os.path.join("my_dataset", "processed")
     dest_root = os.path.join("my_dataset")
     os.makedirs(dest_proc, exist_ok=True)
@@ -45,7 +45,7 @@ async def upload_data(files: List[UploadFile] = File(...)):
     for file in files:
         fname = file.filename
         logging.info("Receiving data file %s", fname)
-        if fname.endswith(".gpickle"):
+        if fname.endswith(".arrow"):
             target = os.path.join(dest_proc, fname)
             with open(target, "wb") as f:
                 shutil.copyfileobj(file.file, f)
@@ -55,7 +55,7 @@ async def upload_data(files: List[UploadFile] = File(...)):
                 with open(target, "wb") as f:
                     f.write(data)
         else:
-            raise HTTPException(status_code=400, detail="only .gpickle or _zones_map.json supported")
+            raise HTTPException(status_code=400, detail="only .arrow or _zones_map.json supported")
         saved.append(fname)
     return {"saved": saved}
 

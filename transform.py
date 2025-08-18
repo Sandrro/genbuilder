@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Canonical transform that WRITES processed graphs in the ORIGINAL GlobalMapper format
+Canonical transform that writes processed graphs in Apache Arrow format
 and also carries zoning labels (zone, zone_id, zone_onehot) at graph-level.
 
 Changes in this version:
-  1) Output files keep the SAME basename as input .pkl (e.g., block_004431.gpickle).
+  1) Output files keep the SAME basename as input .pkl (e.g., block_004431.arrow).
   2) Ability to start processing from a given basename via --start-from block_XXXXXX.
   3) Per-block hard timeout (configurable via --timeout-min, default 10). If exceeded,
      the block is skipped and a JSON line is appended to _timeouts.jsonl under out_dir
@@ -34,9 +34,9 @@ Graph attrs:
   - block_scale  : float (set = long_side)
   - zone, zone_id, zone_onehot
 
-IMPORTANT: This script saves files as <input_basename>.gpickle so the original
-UrbanGraphDataset(get) that reads '{idx}.gpickle' will need basename-driven
-loading if you used indexed naming previously.
+IMPORTANT: This script saves files as <input_basename>.arrow so UrbanGraphDataset
+that reads '{idx}.arrow' will need basename-driven loading if you used indexed
+ naming previously.
 """
 
 from __future__ import annotations
@@ -61,6 +61,8 @@ from shapely.geometry import Polygon
 import shapely  # noqa: F401
 import skgeom
 from PIL import Image, ImageDraw
+import pyarrow as pa
+import pyarrow.ipc as ipc
 
 # optional progress bar
 try:
@@ -359,7 +361,7 @@ def handle_item(
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--raw_dir", required=True, type=Path, help="folder with raw_geo .pkl")
-    ap.add_argument("--out_dir", required=True, type=Path, help="folder for processed .gpickle")
+    ap.add_argument("--out_dir", required=True, type=Path, help="folder for processed .arrow")
     ap.add_argument("--zones_map", type=Path, default=None, help="optional existing zones_map.json")
     ap.add_argument("--knn", type=int, default=4)
     ap.add_argument("--mask_size", type=int, default=64)
@@ -539,9 +541,13 @@ def main():
             if args.dry_run:
                 logger.info("  • DRY RUN: skipping write for graph %s", basename)
             else:
-                out_name = f"{basename}.gpickle"
+                out_name = f"{basename}.arrow"
                 out_path = args.out_dir / out_name
-                nx.write_gpickle(G, out_path)
+                data = pickle.dumps(G)
+                table = pa.table({"graph": [data]})
+                with pa.OSFile(out_path, "wb") as sink:
+                    with ipc.new_file(sink, table.schema) as writer:
+                        writer.write_table(table)
                 logger.info(
                     "  • Saved %s (nodes=%d, edges=%d)",
                     out_path.name,

@@ -5,6 +5,8 @@ from typing import List, Optional
 
 import numpy as np
 import networkx as nx
+import pyarrow as pa
+import pyarrow.ipc as ipc
 
 import torch
 import torch.nn.functional as F
@@ -58,7 +60,7 @@ def get_transform(noise_range: float = 0.0, noise_type: Optional[str] = None,
     return transforms.Compose(ops)
 
 
-GRAPH_EXTENSIONS = ('.gpickle',)
+GRAPH_EXTENSIONS = ('.arrow',)
 
 
 def is_graph_file(filename: str) -> bool:
@@ -274,9 +276,9 @@ def graph_transform(data: Data) -> Data:
 # =============================
 
 class UrbanGraphDataset(Dataset):
-    """PyG Dataset for pre-processed urban block graphs stored as .gpickle.
+    """PyG Dataset for pre-processed urban block graphs stored as .arrow.
 
-    Root directory is the directory that already contains the processed .gpickle files.
+    Root directory is the directory that already contains the processed .arrow files.
     Both raw_dir and processed_dir resolve to the same path, so PyG treats the
     dataset as already processed (process() is a no-op).
     """
@@ -294,7 +296,7 @@ class UrbanGraphDataset(Dataset):
         ])
         self.base_transform = transforms.Compose([transforms.ToTensor()])
 
-        # Index all .gpickle files BEFORE calling super().__init__
+        # Index all .arrow files BEFORE calling super().__init__
         self.graph_paths: List[str] = []
         for dp, _, files in os.walk(self._root_abs):
             for f in files:
@@ -330,7 +332,7 @@ class UrbanGraphDataset(Dataset):
 
     # ---- Processing is a no-op (files are already ready to load) ----
     def process(self):
-        # No processing required; files are already in .gpickle format
+        # No processing required; files are already in .arrow format
         pass
 
     # ---- PyG API ----
@@ -340,7 +342,10 @@ class UrbanGraphDataset(Dataset):
     def get(self, idx: int) -> Data:
         # Read actual file by index
         gpath = self.graph_paths[idx]
-        tmp_graph: nx.Graph = nx.read_gpickle(gpath)
+        with pa.memory_map(gpath, "rb") as source:
+            table = ipc.open_file(source).read_all()
+        buf = table.column("graph")[0].as_py()
+        tmp_graph: nx.Graph = pickle.loads(buf)
 
         # --- Mask & conditioning channel ---
         mask = tmp_graph.graph.get('binary_mask', None)
