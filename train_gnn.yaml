@@ -33,7 +33,7 @@ n_ft_dim : 256
 block_latent_dim : 20
 head_num : 12  # only for GAT
 batch_size : 200
-latent_dim: 512
+latent_dim: 1024
 template_width : 30
 template_height : 4
 
