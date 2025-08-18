@@ -112,8 +112,19 @@ class BlockGenerator(nn.Module):
                 nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain('relu'))
 
     # ---------- helpers ----------
-    def _one_hot_nodes(self, B: int):
-        return torch.eye(self.N, dtype=torch.float32, device=self.device).repeat(B, 1)
+    def _one_hot_nodes(self, B: int, node_cnt: int):
+        """Return one-hot encodings for the existing nodes in the batch.
+
+        Args:
+            B: Number of graphs in the batch.
+            node_cnt: Total number of nodes across the batch.
+
+        The output has ``self.N`` columns so that downstream linear layers
+        expecting a fixed width still work, but only the rows corresponding to
+        real nodes are returned.
+        """
+        eye = torch.eye(self.N, dtype=torch.float32, device=self.device)
+        return eye.repeat(B, 1)[:node_cnt]
 
     # ---------- VAE bits ----------
     def reparameterize(self, mu, logvar):
@@ -148,7 +159,8 @@ class BlockGenerator(nn.Module):
         size = F.relu(self.size_init(size_org))
 
         x = self.ex_init(x)
-        one_hot = self._one_hot_nodes(B)
+        node_cnt = x.size(0)
+        one_hot = self._one_hot_nodes(B, node_cnt)
 
         x = torch.cat([x, one_hot], 1)
         if self.use_cond:
@@ -177,10 +189,10 @@ class BlockGenerator(nn.Module):
         log_var = self.fc_var(zhid)
         return [mu, log_var]
 
-    def decode(self, z, edge_index):
+    def decode(self, z, edge_index, node_cnt):
         B = z.size(0)
-        z = self.d_ft_init(z).view(B * self.N, -1)
-        one_hot = self._one_hot_nodes(B)
+        z = self.d_ft_init(z).view(B * self.N, -1)[:node_cnt]
+        one_hot = self._one_hot_nodes(B, node_cnt)
         z = torch.cat([z, one_hot], 1)
 
         d1 = F.relu(self.d_conv1(z, edge_index))
@@ -199,7 +211,8 @@ class BlockGenerator(nn.Module):
     def forward(self, data, cond=None):
         mu, log_var = self.encode(data, cond=cond)
         z = self.reparameterize(mu, log_var)
-        exist, px, py, sx, sy, bshape, biou = self.decode(z, data.edge_index)
+        node_cnt = data.x.size(0)
+        exist, px, py, sx, sy, bshape, biou = self.decode(z, data.edge_index, node_cnt)
         pos = torch.cat((px, py), 1)
         size = torch.cat((sx, sy), 1)
         return exist, pos, size, mu, log_var, bshape, biou
@@ -315,7 +328,8 @@ class AttentionBlockGenerator_independent(AttentionBlockGenerator):
         size = F.relu(self.size_init(size_org))
 
         x = self.ex_init(x)
-        one_hot = self._one_hot_nodes(B)
+        node_cnt = x.size(0)
+        one_hot = self._one_hot_nodes(B, node_cnt)
 
         x = torch.cat([x, one_hot], 1)
         if self.use_cond:
@@ -344,11 +358,11 @@ class AttentionBlockGenerator_independent(AttentionBlockGenerator):
         log_var = self.fc_var(zhid)
         return [mu, log_var]
 
-    def decode(self, z, block_condition, edge_index):
+    def decode(self, z, block_condition, edge_index, node_cnt):
         B = z.shape[0]
         z = torch.cat((z, block_condition), 1)
-        z = self.d_ft_init(z).view(B * self.N, -1)
-        one_hot = self._one_hot_nodes(B)
+        z = self.d_ft_init(z).view(B * self.N, -1)[:node_cnt]
+        one_hot = self._one_hot_nodes(B, node_cnt)
         z = torch.cat([z, one_hot], 1)
         d1 = F.relu(self.d_conv1(z, edge_index))
         d2 = F.relu(self.d_conv2(d1, edge_index))
@@ -369,7 +383,8 @@ class AttentionBlockGenerator_independent(AttentionBlockGenerator):
         block_scale = self.enc_block_scale(data.block_scale_gt.unsqueeze(1))
         block_shape = data.blockshape_latent_gt.view(-1, self.blockshape_latent_dim)
         block_condition = torch.cat((block_shape, block_scale), 1)
-        exist, px, py, sx, sy, bshape, biou = self.decode(z, block_condition, data.edge_index)
+        node_cnt = data.x.size(0)
+        exist, px, py, sx, sy, bshape, biou = self.decode(z, block_condition, data.edge_index, node_cnt)
         pos = torch.cat((px, py), 1)
         size = torch.cat((sx, sy), 1)
         return exist, pos, size, mu, log_var, bshape, biou
@@ -410,7 +425,8 @@ class AttentionBlockGenerator_independent_cnn(AttentionBlockGenerator_independen
         z = self.reparameterize(mu, log_var)
         block_condition = data.block_condition.view(B, 2, 64, 64)
         block_condition = self.cnn_encode(block_condition)
-        exist, px, py, sx, sy, bshape, biou = self.decode(z, block_condition, data.edge_index)
+        node_cnt = data.x.size(0)
+        exist, px, py, sx, sy, bshape, biou = self.decode(z, block_condition, data.edge_index, node_cnt)
         pos = torch.cat((px, py), 1)
         size = torch.cat((sx, sy), 1)
         return exist, pos, size, mu, log_var, bshape, biou
