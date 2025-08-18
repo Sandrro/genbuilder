@@ -5,3 +5,6 @@ tensorboard
 # Ignore everything under my_dataset except processed subfolder
 my_dataset/*
 !my_dataset/_zones_map.json
+dataset/*
+!dataset/pre_filter.pt
+!dataset/pre_transform.pt
