@@ -7,6 +7,7 @@ import numpy as np
 import networkx as nx
 import pyarrow as pa
 import pyarrow.ipc as ipc
+import pyarrow.parquet as pq
 
 import torch
 import torch.nn.functional as F
@@ -60,7 +61,7 @@ def get_transform(noise_range: float = 0.0, noise_type: Optional[str] = None,
     return transforms.Compose(ops)
 
 
-GRAPH_EXTENSIONS = ('.arrow',)
+GRAPH_EXTENSIONS = ('.arrow', '.parquet')
 
 
 def is_graph_file(filename: str) -> bool:
@@ -276,11 +277,15 @@ def graph_transform(data: Data) -> Data:
 # =============================
 
 class UrbanGraphDataset(Dataset):
-    """PyG Dataset for pre-processed urban block graphs stored as .arrow.
+    """PyG Dataset for pre-processed urban block graphs.
 
-    Root directory is the directory that already contains the processed .arrow files.
-    Both raw_dir and processed_dir resolve to the same path, so PyG treats the
-    dataset as already processed (process() is a no-op).
+    The dataset can consist of individual `.arrow` files (one graph per file)
+    or `.parquet` shards produced by HuggingFace Datasets where each row
+    contains a pickled networkx graph under the `graph` column.
+
+    Root directory is the directory that already contains the processed files.
+    Both `raw_dir` and `processed_dir` resolve to the same path, so PyG treats
+    the dataset as already processed (`process()` is a no-op).
     """
 
     def __init__(self, root: str, transform=None, pre_transform=None,
@@ -296,19 +301,36 @@ class UrbanGraphDataset(Dataset):
         ])
         self.base_transform = transforms.Compose([transforms.ToTensor()])
 
-        # Index all .arrow files BEFORE calling super().__init__
-        self.graph_paths: List[str] = []
+        # Gather all arrow/parquet files BEFORE calling super().__init__
+        self.arrow_paths: List[str] = []
+        self.parquet_files: List[str] = []
         for dp, _, files in os.walk(self._root_abs):
             for f in files:
-                if is_graph_file(f):
-                    self.graph_paths.append(os.path.join(dp, f))
+                if f.lower().endswith('.parquet'):
+                    self.parquet_files.append(os.path.join(dp, f))
+                elif f.lower().endswith('.arrow'):
+                    self.arrow_paths.append(os.path.join(dp, f))
 
-        # Stable/numeric-first sorting
-        def sort_key(p):
-            name = os.path.splitext(os.path.basename(p))[0]
-            return (0, int(name)) if name.isdigit() else (1, name)
+        # Determine storage mode
+        self._use_parquet = len(self.parquet_files) > 0
 
-        self.graph_paths.sort(key=sort_key)
+        if self._use_parquet:
+            # Load tables and build row index mapping
+            self.parquet_files.sort()
+            self.parquet_tables: List[pa.Table] = []
+            self.parquet_index: List[tuple[int, int]] = []
+            for pf in self.parquet_files:
+                table = pq.read_table(pf)
+                fid = len(self.parquet_tables)
+                self.parquet_tables.append(table)
+                for ridx in range(table.num_rows):
+                    self.parquet_index.append((fid, ridx))
+        else:
+            # Stable/numeric-first sorting for arrow files
+            def sort_key(p):
+                name = os.path.splitext(os.path.basename(p))[0]
+                return (0, int(name)) if name.isdigit() else (1, name)
+            self.arrow_paths.sort(key=sort_key)
 
         super().__init__(self._root_abs, transform, pre_transform)
 
@@ -324,27 +346,37 @@ class UrbanGraphDataset(Dataset):
     # ---- Filenames so PyG thinks dataset is already processed ----
     @property
     def raw_file_names(self):
-        return [os.path.relpath(p, self.raw_dir) for p in self.graph_paths]
+        files = self.parquet_files if self._use_parquet else self.arrow_paths
+        return [os.path.relpath(p, self.raw_dir) for p in files]
 
     @property
     def processed_file_names(self):
-        return [os.path.relpath(p, self.processed_dir) for p in self.graph_paths]
+        files = self.parquet_files if self._use_parquet else self.arrow_paths
+        return [os.path.relpath(p, self.processed_dir) for p in files]
 
     # ---- Processing is a no-op (files are already ready to load) ----
     def process(self):
-        # No processing required; files are already in .arrow format
+        # No processing required; files are already ready to load
         pass
 
     # ---- PyG API ----
     def len(self) -> int:
-        return len(self.graph_paths)
+        if self._use_parquet:
+            return len(self.parquet_index)
+        return len(self.arrow_paths)
 
     def get(self, idx: int) -> Data:
-        # Read actual file by index
-        gpath = self.graph_paths[idx]
-        with pa.memory_map(gpath, "rb") as source:
-            table = ipc.open_file(source).read_all()
-        buf = table.column("graph")[0].as_py()
+        if self._use_parquet:
+            file_idx, row_idx = self.parquet_index[idx]
+            table = self.parquet_tables[file_idx]
+            buf = table.column("graph")[row_idx].as_py()
+            gpath = f"{self.parquet_files[file_idx]}[{row_idx}]"
+        else:
+            # Read .arrow file by index
+            gpath = self.arrow_paths[idx]
+            with pa.memory_map(gpath, "rb") as source:
+                table = ipc.open_file(source).read_all()
+            buf = table.column("graph")[0].as_py()
         tmp_graph: nx.Graph = pickle.loads(buf)
 
         # --- Mask & conditioning channel ---

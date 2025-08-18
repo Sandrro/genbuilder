@@ -225,7 +225,7 @@ if __name__ == "__main__":
     if num_data == 0:
         raise RuntimeError(
             f"No graph data found in '{dataset_path}'. "
-            "Please ensure the dataset contains processed .arrow files."
+            "Please ensure the dataset contains processed .arrow or .parquet files."
         )
 
     # === NEW: stratified split by zone_id if present ===
