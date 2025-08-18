@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
 import argparse
 import os
-import shutil
-import tempfile
 from pathlib import Path
 
-from huggingface_hub import HfApi
+import datasets as ds
+import pyarrow as pa
+import pyarrow.ipc as ipc
+
+
+def load_graph_bytes(path: Path) -> bytes:
+    if path.suffix == ".arrow":
+        with pa.memory_map(str(path), "rb") as source:
+            table = ipc.open_file(source).read_all()
+        return table.column("graph")[0].as_py()
+    if path.suffix == ".gpickle":
+        with open(path, "rb") as f:
+            return f.read()
+    raise ValueError(f"Unsupported file type: {path}")
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Upload processed dataset to HuggingFace")
+    parser = argparse.ArgumentParser(description="Convert gpickles to arrow and upload to HuggingFace")
     parser.add_argument("--path", default="my_dataset/processed", help="Path to processed data folder")
     parser.add_argument("--repo", required=True, help="HuggingFace dataset repo id, e.g. username/dataset")
     parser.add_argument("--token", default=None, help="HuggingFace token with write permission")
@@ -17,55 +29,28 @@ def main():
         "--limit",
         type=int,
         default=None,
-        help="Upload only the first N files from the dataset folder",
-    )
-    parser.add_argument(
-        "--large",
-        action="store_true",
-        help="Use resilient upload_large_folder for large datasets",
+        help="Use only the first N files from the dataset folder",
     )
     args = parser.parse_args()
 
-    if not os.path.isdir(args.path):
+    data_dir = Path(args.path)
+    if not data_dir.is_dir():
         raise FileNotFoundError(f"Processed dataset folder not found: {args.path}")
 
-    base_path = Path(args.path)
-    upload_path = base_path
-    temp_dir = None
-
+    files = sorted([p for p in data_dir.iterdir() if p.suffix in {".gpickle", ".arrow"}])
     if args.limit is not None:
-        # Create a temporary directory containing only the first N files
-        temp_dir = tempfile.TemporaryDirectory()
-        upload_path = Path(temp_dir.name)
-        files = sorted(p for p in base_path.rglob("*") if p.is_file())
-        for p in files[: args.limit]:
-            rel = p.relative_to(base_path)
-            dest = upload_path / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(p, dest)
+        files = files[: args.limit]
+    if not files:
+        raise RuntimeError("No .gpickle or .arrow files found")
 
-    api = HfApi(token=args.token)
-    try:
-        if args.large:
-            api.upload_large_folder(
-                repo_id=args.repo,
-                folder_path=str(upload_path),
-                repo_type="dataset",
-            )
-            print(f"Uploaded large folder {upload_path} to {args.repo}")
-        else:
-            api.upload_folder(
-                repo_id=args.repo,
-                folder_path=str(upload_path),
-                path_in_repo=".",
-                repo_type="dataset",
-                token=args.token,
-                commit_message=args.commit_message,
-            )
-            print(f"Uploaded {upload_path} to {args.repo}")
-    finally:
-        if temp_dir is not None:
-            temp_dir.cleanup()
+    def gen():
+        for p in files:
+            yield {"graph": load_graph_bytes(p)}
+
+    features = ds.Features({"graph": ds.Value("binary")})
+    dataset = ds.Dataset.from_generator(gen, features=features)
+    dataset.push_to_hub(args.repo, token=args.token, commit_message=args.commit_message)
+
 
 if __name__ == "__main__":
     main()

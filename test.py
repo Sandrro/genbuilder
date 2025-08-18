@@ -1,4 +1,6 @@
 import os, pickle, random, shutil, json
+import pyarrow as pa
+import pyarrow.ipc as ipc
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -14,6 +16,21 @@ from collections import defaultdict
 import logging
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+
+
+def write_graph_arrow(graph: nx.Graph, path: str) -> None:
+    data = pickle.dumps(graph)
+    table = pa.table({"graph": [data]})
+    with pa.OSFile(path, "wb") as sink:
+        with ipc.new_file(sink, table.schema) as writer:
+            writer.write_table(table)
+
+
+def read_graph_arrow(path: str) -> nx.Graph:
+    with pa.memory_map(path, "rb") as source:
+        table = ipc.open_file(source).read_all()
+    data = table.column("graph")[0].as_py()
+    return pickle.loads(data)
 
 """
 Test script with zoning condition support (compatible with original repo outputs).
@@ -428,14 +445,14 @@ if __name__ == "__main__":
                 exist_np, asp_rto_np, long_side_np, shape_pred_np, b_iou_np
             )
             filename = str(val_idx[fn_ct]) if is_reconstruct else str(fn_ct)
-            pickle.dump(g_add, open(os.path.join(res_graph_path, filename + ".gpickle"), 'wb'))
+            write_graph_arrow(g_add, os.path.join(res_graph_path, filename + ".arrow"))
             visual_block_graph(g_add, res_visual_path, filename, draw_edge, draw_nonexist)
             visual_existence_template(g_add, ex_visual_path, filename, coord_scale=1,
                                       template_width=template_width, template_height=template_height)
             if is_reconstruct:
-                rst = os.path.join(dataset_path, 'processed', filename + ".gpickle")
-                dst = os.path.join(gt_graph_path, filename + '.gpickle')
-                g = nx.read_gpickle(rst)
+                rst = os.path.join(dataset_path, 'processed', filename + ".arrow")
+                dst = os.path.join(gt_graph_path, filename + '.arrow')
+                g = read_graph_arrow(rst)
                 shutil.copyfile(rst, dst)
             fn_ct += 1
 

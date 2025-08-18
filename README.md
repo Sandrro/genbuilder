@@ -45,12 +45,12 @@ evaluation.
 
 3. **Upload dataset files (optional)**
 
-   You can still upload multiple `.gpickle` files and (optionally) `_zones_map.json` before training:
+   You can still upload multiple `.arrow` files and (optionally) `_zones_map.json` before training:
 
    ```bash
    curl -X POST http://localhost:8000/data \
-        -F "files=@my_dataset/processed/quarter1.gpickle" \
-        -F "files=@my_dataset/processed/quarter2.gpickle" \
+        -F "files=@my_dataset/processed/quarter1.arrow" \
+        -F "files=@my_dataset/processed/quarter2.arrow" \
         -F "files=@my_dataset/processed/_zones_map.json"
    ```
 
@@ -99,7 +99,7 @@ python data_to_hf.py --repo <user/dataset> --token <hf_token> --large
 
 During training or testing the data can be downloaded automatically by providing the repository to `run_pipeline.py` (or via the API's `dataset_repo` field). After training, the best checkpoint and its log file can be pushed to a HuggingFace model repository using `--upload_repo` and later restored for evaluation with `--model_repo`.
 
-"processed" folder contains preprocessed graph-represented city blocks which can be read by `networkx.read_gpickle()`. `raw_geo` contains corresponding original building and block polygons (shapely.polygon format) of each city block (coordinates in UTM Zone projection) readable by `pickle.load()`.
+"processed" folder contains preprocessed graph-represented city blocks stored as `.arrow` files with pickled `networkx` graphs inside. `raw_geo` contains corresponding original building and block polygons (shapely.polygon format) of each city block (coordinates in UTM Zone projection) readable by `pickle.load()`.
 
 Our canonical spatial transformation converts the original building polygons to the canonical version. After simple normalization by mean subtraction and std dividing, coordinates and location information are encoded as node attributes in 2D grid graphs, then saved in `processed`. Since the raw dataset is publicly accessible, we encourage users to implement their own preprocessing of original building polygons. It may facilitate better performance.
 
