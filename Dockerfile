@@ -8,7 +8,7 @@ WORKDIR /app
 COPY requirements.txt ./
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential cmake libcgal-dev libcgal-qt5-dev libeigen3-dev libboost-all-dev \
+      build-essential cmake git libcgal-dev libcgal-qt5-dev libeigen3-dev libboost-all-dev \
       libgmp-dev libmpfr-dev \
  && rm -rf /var/lib/apt/lists/*
 
@@ -17,7 +17,7 @@ RUN python -m pip install --upgrade pip \
  && pip install --no-cache-dir "setuptools<70" wheel "pybind11==2.10.4"
 
 RUN pip install --no-cache-dir --no-build-isolation \
-      https://github.com/scikit-geometry/scikit-geometry/archive/refs/tags/0.1.2.tar.gz
+      git+https://github.com/scikit-geometry/scikit-geometry.git@e4a25c0cde054a3a4bd6b21d3ca30db8e7e6a178
 
 ARG TORCH=2.4.1
 ARG CUDA=cu118
