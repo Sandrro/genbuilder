@@ -426,7 +426,10 @@ class UrbanGraphDataset(Dataset):
         if zid is not None:
             data.zone_id = int(zid)
         if zoh is not None:
-            data.zone_onehot = torch.tensor(np.asarray(zoh), dtype=torch.float32)
+            zoh_arr = np.asarray(zoh, dtype=np.float32)
+            if zoh_arr.ndim == 1:
+                zoh_arr = zoh_arr[None, :]
+            data.zone_onehot = torch.tensor(zoh_arr, dtype=torch.float32)
 
         return data
 

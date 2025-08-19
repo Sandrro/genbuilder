@@ -138,12 +138,16 @@ if __name__ == "__main__":
     else:
         opt = train_opt
 
-    # === NEW: autodetect cond_dim from _zones_map.json (if not set) ===
-    if ('cond_dim' not in opt or int(opt['cond_dim']) <= 0) and opt.get('is_conditional_block', False):
+    # === NEW: autodetect/override cond_dim from _zones_map.json ===
+    if opt.get('is_conditional_block', False):
         zmap = _try_load_zones_map(dataset_path)
         if zmap is not None:
-            opt['cond_dim'] = int(len(zmap))
-            print(f"[info] Detected cond_dim={opt['cond_dim']} from _zones_map.json")
+            detected = int(len(zmap))
+            if int(opt.get('cond_dim', 0)) != detected:
+                print(
+                    f"[info] Overriding cond_dim={opt.get('cond_dim')} -> {detected} based on _zones_map.json"
+                )
+                opt['cond_dim'] = detected
 
     notes = 'GlobalMapper'
 
