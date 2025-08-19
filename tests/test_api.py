@@ -46,8 +46,9 @@ def test_infer_block_returns_geojson(monkeypatch):
         ],
     }
 
-    def fake_infer(geojson):
+    def fake_infer(geojson, zone_attr):
         assert geojson == input_geojson
+        assert zone_attr == "func_zone"
         return output_geojson
 
     monkeypatch.setattr("api.infer_from_geojson", fake_infer)
@@ -60,7 +61,7 @@ def test_infer_block_returns_geojson(monkeypatch):
         )
     }
 
-    response = client.post("/infer", files=files)
+    response = client.post("/infer", files=files, params={"zone_attr": "func_zone"})
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/geo+json")
     data = json.loads(response.content)

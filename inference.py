@@ -25,14 +25,21 @@ def _dummy_infer_buildings(block: Polygon, n: int = 5) -> List[Polygon]:
     return buildings
 
 
-def infer_from_geojson(geojson: Dict[str, Any]) -> Dict[str, Any]:
+def infer_from_geojson(geojson: Dict[str, Any], zone_attr: str) -> Dict[str, Any]:
     """Run model inference for a block described by GeoJSON.
+
+    The function extracts functional zone labels from the provided GeoJSON
+    using the ``zone_attr`` field of each feature's properties. The dummy
+    inference then generates a number of buildings depending on the zone
+    label and assigns the label to the generated buildings.
 
     Parameters
     ----------
     geojson: dict
-        A GeoJSON FeatureCollection with at least one Polygon feature
-        representing the block.
+        A GeoJSON FeatureCollection with one or more Polygon features
+        representing blocks.
+    zone_attr: str
+        Name of the attribute containing the functional zone label.
 
     Returns
     -------
@@ -46,10 +53,27 @@ def infer_from_geojson(geojson: Dict[str, Any]) -> Dict[str, Any]:
     """
     if not geojson.get("features"):
         raise ValueError("GeoJSON must contain at least one feature")
-    geom = shape(geojson["features"][0]["geometry"])
-    buildings = _dummy_infer_buildings(geom)
-    features = [{"type": "Feature", "properties": {}, "geometry": mapping(b)} for b in buildings]
-    result: Dict[str, Any] = {"type": "FeatureCollection", "features": features}
+    if not zone_attr:
+        raise ValueError("zone_attr must be provided")
+
+    # Mapping from zone label to number of buildings to generate
+    zone_building_count = {
+        "residential": 10,
+        "commercial": 6,
+        "industrial": 3,
+    }
+
+    result_features: List[Dict[str, Any]] = []
+    for feat in geojson["features"]:
+        geom = shape(feat["geometry"])
+        zone_label = feat.get("properties", {}).get(zone_attr)
+        n = zone_building_count.get(zone_label, 5)
+        buildings = _dummy_infer_buildings(geom, n=n)
+        for b in buildings:
+            props = {zone_attr: zone_label} if zone_label is not None else {}
+            result_features.append({"type": "Feature", "properties": props, "geometry": mapping(b)})
+
+    result: Dict[str, Any] = {"type": "FeatureCollection", "features": result_features}
     if "crs" in geojson:
         result["crs"] = geojson["crs"]
     return result

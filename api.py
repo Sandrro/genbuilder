@@ -6,7 +6,7 @@ import tempfile
 
 import shutil
 from typing import List
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.responses import FileResponse
 
 from pydantic import BaseModel
@@ -95,7 +95,10 @@ def start_train(req: TrainRequest):
 
 
 @app.post("/infer")
-async def infer_block(file: UploadFile = File(...)):
+async def infer_block(
+    zone_attr: str = Query(..., description="Name of attribute containing functional zone label"),
+    file: UploadFile = File(...),
+):
     """Generate building footprints for a block polygon.
 
     The uploaded file must contain a GeoJSON FeatureCollection with the block
@@ -109,7 +112,7 @@ async def infer_block(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="invalid GeoJSON")
 
     try:
-        result = infer_from_geojson(geojson)
+        result = infer_from_geojson(geojson, zone_attr)
     except Exception as e:  # pragma: no cover - safe guard
         raise HTTPException(status_code=400, detail=str(e))
 
