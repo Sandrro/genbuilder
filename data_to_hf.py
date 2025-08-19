@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 from pathlib import Path
 
 import datasets as ds
 import pyarrow as pa
 import pyarrow.ipc as ipc
+from huggingface_hub import HfApi
 
 
 def load_graph_bytes(path: Path) -> bytes:
@@ -37,6 +39,12 @@ def main():
     if not data_dir.is_dir():
         raise FileNotFoundError(f"Processed dataset folder not found: {args.path}")
 
+    zones_map_path = data_dir / "_zones_map.json"
+    zones_map = None
+    if zones_map_path.is_file():
+        with zones_map_path.open("r", encoding="utf-8") as zf:
+            zones_map = json.load(zf)
+
     files = sorted([p for p in data_dir.iterdir() if p.suffix in {".gpickle", ".arrow"}])
     if args.limit is not None:
         files = files[: args.limit]
@@ -49,7 +57,21 @@ def main():
 
     features = ds.Features({"graph": ds.Value("binary")})
     dataset = ds.Dataset.from_generator(gen, features=features)
+    if zones_map is not None:
+        dataset = dataset.with_metadata({"zones_map": zones_map})
+
     dataset.push_to_hub(args.repo, token=args.token, commit_message=args.commit_message)
+
+    if zones_map is not None:
+        api = HfApi()
+        api.upload_file(
+            path_or_fileobj=str(zones_map_path),
+            path_in_repo="_zones_map.json",
+            repo_id=args.repo,
+            repo_type="dataset",
+            token=args.token,
+            commit_message=args.commit_message,
+        )
 
 
 if __name__ == "__main__":

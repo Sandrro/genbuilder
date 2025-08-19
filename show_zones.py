@@ -118,8 +118,6 @@ def process_hf_dataset(repo_id: str, split: str, token: Optional[str]) -> None:
 
     from datasets import load_dataset
 
-    zones_map = load_zones_map_hf(repo_id, token)
-
     load_dataset_sig = inspect.signature(load_dataset)
     dataset_kwargs = {"split": split}
     if token is not None:
@@ -128,6 +126,10 @@ def process_hf_dataset(repo_id: str, split: str, token: Optional[str]) -> None:
         else:
             dataset_kwargs["use_auth_token"] = token
     dataset = load_dataset(repo_id, **dataset_kwargs)
+
+    zones_map = dataset.info.metadata.get("zones_map")
+    if zones_map is None:
+        zones_map = load_zones_map_hf(repo_id, token)
 
     stats = defaultdict(lambda: {"graphs": 0, "nodes": 0, "edges": 0})
 
