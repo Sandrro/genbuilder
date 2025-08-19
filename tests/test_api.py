@@ -10,18 +10,18 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from api import app
 
 
-def test_infer_block_returns_geojson(monkeypatch):
-    """The /infer endpoint should return the GeoJSON produced by the model."""
+def test_infer_block_uses_counts_and_zone():
+    """The /infer endpoint should honour provided block counts and zone labels."""
 
     client = TestClient(app)
 
-    # minimal block polygon
+    # minimal block polygon with id and zone label
     input_geojson = {
         "type": "FeatureCollection",
         "features": [
             {
                 "type": "Feature",
-                "properties": {},
+                "properties": {"id": "b1", "zone": "residential"},
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [
@@ -32,26 +32,6 @@ def test_infer_block_returns_geojson(monkeypatch):
         ],
     }
 
-    output_geojson = {
-        "type": "FeatureCollection",
-        "features": [
-            {
-                "type": "Feature",
-                "properties": {},
-                "geometry": {
-                    "type": "Point",
-                    "coordinates": [0, 0],
-                },
-            }
-        ],
-    }
-
-    def fake_infer(geojson):
-        assert geojson == input_geojson
-        return output_geojson
-
-    monkeypatch.setattr("api.infer_from_geojson", fake_infer)
-
     files = {
         "file": (
             "block.geojson",
@@ -59,10 +39,14 @@ def test_infer_block_returns_geojson(monkeypatch):
             "application/geo+json",
         )
     }
+    counts = {"b1": 3}
 
-    response = client.post("/infer", files=files)
+    response = client.post("/infer", files=files, data={"counts": json.dumps(counts)})
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/geo+json")
     data = json.loads(response.content)
-    assert data == output_geojson
+    assert data["type"] == "FeatureCollection"
+    assert len(data["features"]) == 3
+    # every generated building should carry the zone label
+    assert all(f["properties"].get("zone") == "residential" for f in data["features"])
 

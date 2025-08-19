@@ -6,7 +6,7 @@ import tempfile
 
 import shutil
 from typing import List
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 
 from pydantic import BaseModel
@@ -95,7 +95,7 @@ def start_train(req: TrainRequest):
 
 
 @app.post("/infer")
-async def infer_block(file: UploadFile = File(...)):
+async def infer_block(file: UploadFile = File(...), counts: str = Form("{}")):
     """Generate building footprints for a block polygon.
 
     The uploaded file must contain a GeoJSON FeatureCollection with the block
@@ -109,7 +109,12 @@ async def infer_block(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="invalid GeoJSON")
 
     try:
-        result = infer_from_geojson(geojson)
+        counts_dict = json.loads(counts) if counts else {}
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid counts")
+
+    try:
+        result = infer_from_geojson(geojson, block_counts=counts_dict)
     except Exception as e:  # pragma: no cover - safe guard
         raise HTTPException(status_code=400, detail=str(e))
 
