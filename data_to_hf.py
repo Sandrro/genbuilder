@@ -57,8 +57,9 @@ def main():
 
     features = ds.Features({"graph": ds.Value("binary")})
     dataset = ds.Dataset.from_generator(gen, features=features)
-    if zones_map is not None:
-        dataset = dataset.with_metadata({"zones_map": zones_map})
+    # The datasets library >=4.0 removed the `with_metadata` helper.
+    # Instead of attaching arbitrary metadata to the Dataset object,
+    # we upload the optional `_zones_map.json` file separately below.
 
     dataset.push_to_hub(args.repo, token=args.token, commit_message=args.commit_message)
 
