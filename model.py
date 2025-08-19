@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric
 from torch_geometric.nn import MessagePassing
+from torch.nn.parameter import UninitializedParameter
 
 
 class NaiveMsgPass(MessagePassing):
@@ -106,6 +107,9 @@ class BlockGenerator(nn.Module):
 
         for m in self.modules():
             if isinstance(m, nn.Linear):
+                w = getattr(m, "weight", None)
+                if isinstance(w, UninitializedParameter):
+                    continue
                 nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain('relu'))
 
     # ---------- helpers ----------
