@@ -84,7 +84,11 @@ def main():
 
     def gen():
         for p in files:
-            g_bytes, zid, zoh = load_graph_record(p, K or 0)
+            try:
+                g_bytes, zid, zoh = load_graph_record(p, K or 0)
+            except Exception as e:
+                print(f"Skipping {p}: {e}")
+                continue
             record = {"graph": g_bytes}
             if K is not None:
                 record.update({"zone_id": zid, "zone_onehot": zoh})
