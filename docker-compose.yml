@@ -1,8 +1,11 @@
 services:
-
   app:
     build: .
     gpus: all
+
+    # Ключевые правки для PyTorch DataLoader и больших батчей
+    shm_size: "2gb"     # увеличивает /dev/shm внутри контейнера
+
     ports:
       - "8005:8000"
     volumes:
@@ -10,3 +13,9 @@ services:
       - ./epoch:/app/epoch
       - ./logs:/app/logs
       - ./tensorboard:/app/tensorboard
+
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HF_HOME=/app/.cache/huggingface
+
+    restart: unless-stopped

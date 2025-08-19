@@ -6,9 +6,9 @@ clean_cache : False
 save_record : True
 is_multigpu : False
 
-save_epoch : 1
+save_epoch : 5
 val_ratio : 0.2
-total_epochs : 1
+total_epochs : 10
 start_epoch : 0
 
 
@@ -32,7 +32,7 @@ lr : 0.001
 n_ft_dim : 256
 block_latent_dim : 20
 head_num : 12  # only for GAT
-batch_size : 200
+batch_size : 10
 latent_dim: 1024
 template_width : 30
 template_height : 4
