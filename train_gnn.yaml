@@ -19,7 +19,7 @@ is_input_road: True
 encode_cnn : True                  # оставить True, если используешь *_cnn модель
 is_blockplanner : False
 
-cond_dim: 12                       # <-- число классов зон из _zones_map.json
+cond_dim: 0                        # autodetect from _zones_map.json
 
 attten_net : 
   - 'TransformerConv'
