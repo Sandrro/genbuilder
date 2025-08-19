@@ -1,4 +1,5 @@
 fastapi
+httpx
 huggingface_hub
 networkx
 numpy

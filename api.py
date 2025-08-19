@@ -113,7 +113,9 @@ async def infer_block(file: UploadFile = File(...)):
     except Exception as e:  # pragma: no cover - safe guard
         raise HTTPException(status_code=400, detail=str(e))
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".geojson") as tmp:
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".geojson", encoding="utf-8"
+    ) as tmp:
         json.dump(result, tmp)
         tmp_path = tmp.name
 
