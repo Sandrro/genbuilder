@@ -2,23 +2,52 @@
 import argparse
 import json
 import os
+import pickle
 from pathlib import Path
 
 import datasets as ds
+import numpy as np
 import pyarrow as pa
 import pyarrow.ipc as ipc
 from huggingface_hub import HfApi
+import networkx as nx  # noqa: F401 - needed for pickle loading
 
 
-def load_graph_bytes(path: Path) -> bytes:
+def load_graph_record(path: Path, K: int):
+    """Load a graph file and return serialized bytes plus zoning info.
+
+    The graph is unpickled so that any stored ``zone_onehot`` attribute can be
+    reshaped to a flat vector of length ``K`` before re-serializing. This keeps
+    functional zone information intact when uploaded to HuggingFace datasets.
+    """
+
     if path.suffix == ".arrow":
         with pa.memory_map(str(path), "rb") as source:
             table = ipc.open_file(source).read_all()
-        return table.column("graph")[0].as_py()
-    if path.suffix == ".gpickle":
+        graph_bytes = table.column("graph")[0].as_py()
+    elif path.suffix == ".gpickle":
         with open(path, "rb") as f:
-            return f.read()
-    raise ValueError(f"Unsupported file type: {path}")
+            graph_bytes = f.read()
+    else:
+        raise ValueError(f"Unsupported file type: {path}")
+
+    g = pickle.loads(graph_bytes)
+    zoh = g.graph.get("zone_onehot")
+    if zoh is None:
+        zone_onehot = [0.0] * K
+        zone_id = -1
+    else:
+        zoh_arr = np.asarray(zoh, dtype=np.float32).reshape(-1)
+        if K and zoh_arr.size != K:
+            raise ValueError(
+                f"zone_onehot length {zoh_arr.size} != expected {K} for {path}"
+            )
+        zone_onehot = zoh_arr.tolist()
+        zone_id = int(np.argmax(zoh_arr)) if zoh_arr.size > 0 else -1
+        g.graph["zone_onehot"] = zoh_arr
+        g.graph["zone_id"] = zone_id
+
+    return pickle.dumps(g), zone_id, zone_onehot
 
 
 def main():
@@ -51,11 +80,25 @@ def main():
     if not files:
         raise RuntimeError("No .gpickle or .arrow files found")
 
+    K = len(zones_map["map"]) if zones_map and "map" in zones_map else None
+
     def gen():
         for p in files:
-            yield {"graph": load_graph_bytes(p)}
+            g_bytes, zid, zoh = load_graph_record(p, K or 0)
+            record = {"graph": g_bytes}
+            if K is not None:
+                record.update({"zone_id": zid, "zone_onehot": zoh})
+            yield record
 
-    features = ds.Features({"graph": ds.Value("binary")})
+    features_dict = {"graph": ds.Value("binary")}
+    if K is not None:
+        features_dict.update(
+            {
+                "zone_id": ds.Value("int32"),
+                "zone_onehot": ds.Sequence(ds.Value("float32"), length=K),
+            }
+        )
+    features = ds.Features(features_dict)
     dataset = ds.Dataset.from_generator(gen, features=features)
     # The datasets library >=4.0 removed the `with_metadata` helper.
     # Instead of attaching arbitrary metadata to the Dataset object,
