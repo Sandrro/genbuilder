@@ -8,26 +8,60 @@ warnings.filterwarnings("ignore")
 
 
 def _make_zone_condition(batch, opt, device):
-    """Build per-graph zoning condition tensor (B, K) from batch.
-    Prefers batch.zone_onehot; falls back to one-hot from zone_id if present.
-    Returns None if no labels.
-    """
-    cond = getattr(batch, 'zone_onehot', None)
-    if cond is not None:
-        # cond может быть списком или тензором; приведём к (B, K) тензору на device
-        if isinstance(cond, (list, tuple)):
-            cond = torch.stack([torch.as_tensor(c, dtype=torch.float32) for c in cond], dim=0)
-        cond = cond.to(device)
-        return cond
+    """Build per-graph conditioning tensor from available features.
 
-    zid = getattr(batch, 'zone_id', None)
-    if zid is None or 'cond_dim' not in opt or int(opt['cond_dim']) <= 0:
+    Concatenates zoning one-hot, road features and template embeddings if
+    present. Prints the shape and basic statistics of each component and the
+    final concatenated tensor to ease debugging.
+    """
+
+    def _to_tensor(v):
+        t = torch.as_tensor(v, dtype=torch.float32, device=device)
+        if t.dim() == 1:
+            t = t.unsqueeze(1)
+        return t
+
+    def _log_stats(name, t):
+        print(f"{name}:", t.shape)
+        flat = t.view(-1).float()
+        print(
+            f"  mean={float(flat.mean()):.4f} std={float(flat.std()):.4f} "
+            f"min={float(flat.min()):.4f} max={float(flat.max()):.4f}"
+        )
+
+    parts = []
+
+    zone_onehot = getattr(batch, 'zone_onehot', None)
+    if zone_onehot is None:
+        zid = getattr(batch, 'zone_id', None)
+        if zid is not None and 'cond_dim' in opt and int(opt['cond_dim']) > 0:
+            K = int(opt['cond_dim'])
+            zid_t = torch.as_tensor(zid, device=device).view(-1)
+            zone_onehot = torch.zeros((zid_t.numel(), K), device=device)
+            zone_onehot[torch.arange(zid_t.numel(), device=device), zid_t.long()] = 1.0
+    if zone_onehot is not None:
+        zone_onehot = _to_tensor(zone_onehot)
+        _log_stats('zone_onehot', zone_onehot)
+        parts.append(zone_onehot)
+
+    road_feats = getattr(batch, 'road_feats', None)
+    if road_feats is not None:
+        road_feats = _to_tensor(road_feats)
+        _log_stats('road_feats', road_feats)
+        parts.append(road_feats)
+
+    templ_part = getattr(batch, 'template_flat_or_cnn', None)
+    if templ_part is not None:
+        templ_part = _to_tensor(templ_part)
+        _log_stats('template_flat_or_cnn', templ_part)
+        parts.append(templ_part)
+
+    if not parts:
         return None
-    K = int(opt['cond_dim'])
-    zid_t = torch.as_tensor(zid, device=device).view(-1)
-    cond = torch.zeros((zid_t.numel(), K), device=device)
-    cond[torch.arange(zid_t.numel(), device=device), zid_t.long()] = 1.0
-    return cond
+
+    node_cond = torch.cat(parts, dim=1)
+    _log_stats('node_cond total', node_cond)
+    return node_cond
 
 
 def train(model, epoch, train_loader, device, opt, loss_dict, optimizer, scheduler):

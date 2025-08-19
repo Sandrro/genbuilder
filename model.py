@@ -29,14 +29,11 @@ class BlockGenerator(nn.Module):
         self.blockshape_latent_dim = int(opt.get('block_latent_dim', 20))
 
         # Zoning conditioning
-        self.cond_dim = int(opt.get('cond_dim', 0))
-        self.use_cond = self.cond_dim > 0
-        if self.use_cond:
-            self.cond_proj = nn.Sequential(
-                nn.Linear(self.cond_dim, self.latent_ch // 2),
-                nn.ReLU(),
-                nn.Linear(self.latent_ch // 2, self.latent_ch // 2),
-            )
+        self.cond_proj = nn.Sequential(
+            nn.LazyLinear(128),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, self.latent_ch // 2),
+        )
 
         # Pooling
         aggr = opt.get('aggr', 'Mean')
@@ -64,7 +61,7 @@ class BlockGenerator(nn.Module):
 
         # Encoders
         self.ex_init = nn.Linear(2, self.latent_ch // 4)
-        ft_in = (self.latent_ch // 4) + self.N + (self.latent_ch // 2 if self.use_cond else 0)
+        ft_in = (self.latent_ch // 4) + self.N + (self.latent_ch // 2)
         self.ft_init = nn.Linear(ft_in, self.latent_ch // 2)
         self.pos_init = nn.Linear(2, self.latent_ch // 2)
         self.size_init = nn.Linear(2, self.latent_ch // 2)
@@ -163,13 +160,12 @@ class BlockGenerator(nn.Module):
         one_hot = self._one_hot_nodes(B, node_cnt)
 
         x = torch.cat([x, one_hot], 1)
-        if self.use_cond:
-            if cond is not None:
-                node_cond = cond[data.batch] if hasattr(data, 'batch') else cond.repeat(x.size(0), 1)
-                cond_emb = self.cond_proj(node_cond)
-            else:
-                cond_emb = torch.zeros(x.size(0), self.latent_ch // 2, device=self.device)
-            x = torch.cat([x, cond_emb], 1)
+        if cond is not None:
+            node_cond = cond[data.batch] if hasattr(data, 'batch') else cond.repeat(x.size(0), 1)
+            cond_emb = self.cond_proj(node_cond)
+        else:
+            cond_emb = torch.zeros(x.size(0), self.latent_ch // 2, device=self.device)
+        x = torch.cat([x, cond_emb], 1)
 
         ft = F.relu(self.ft_init(x))
 
@@ -332,13 +328,12 @@ class AttentionBlockGenerator_independent(AttentionBlockGenerator):
         one_hot = self._one_hot_nodes(B, node_cnt)
 
         x = torch.cat([x, one_hot], 1)
-        if self.use_cond:
-            if cond is not None:
-                node_cond = cond[data.batch] if hasattr(data, 'batch') else cond.repeat(x.size(0), 1)
-                cond_emb = self.cond_proj(node_cond)
-            else:
-                cond_emb = torch.zeros(x.size(0), self.latent_ch // 2, device=self.device)
-            x = torch.cat([x, cond_emb], 1)
+        if cond is not None:
+            node_cond = cond[data.batch] if hasattr(data, 'batch') else cond.repeat(x.size(0), 1)
+            cond_emb = self.cond_proj(node_cond)
+        else:
+            cond_emb = torch.zeros(x.size(0), self.latent_ch // 2, device=self.device)
+        x = torch.cat([x, cond_emb], 1)
 
         ft = F.relu(self.ft_init(x))
 

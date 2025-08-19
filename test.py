@@ -331,30 +331,64 @@ if __name__ == "__main__":
 
     # --- helper: build cond tensor from batch or override ---
     def build_cond(batch):
-        # override path
+        def _to_tensor(v):
+            t = torch.as_tensor(v, dtype=torch.float32, device=device)
+            if t.dim() == 1:
+                t = t.unsqueeze(1)
+            return t
+
+        def _log_stats(name, t):
+            print(f"{name}:", t.shape)
+            flat = t.view(-1).float()
+            print(
+                f"  mean={float(flat.mean()):.4f} std={float(flat.std()):.4f} "
+                f"min={float(flat.min()):.4f} max={float(flat.max()):.4f}"
+            )
+
+        parts = []
+
+        # override zone
+        zone_onehot = None
         if ZONE_ID is not None and int(opt.get('cond_dim', 0)) > 0:
             K = int(opt['cond_dim'])
-            oh = torch.zeros((batch.num_graphs, K), device=device)
-            oh[:, int(ZONE_ID)] = 1.0
-            return oh
-        if ZONE_NAME is not None and zones_map and int(opt.get('cond_dim', 0)) > 0:
+            zone_onehot = torch.zeros((batch.num_graphs, K), device=device)
+            zone_onehot[:, int(ZONE_ID)] = 1.0
+        elif ZONE_NAME is not None and zones_map and int(opt.get('cond_dim', 0)) > 0:
             zid = zones_map.get(ZONE_NAME, None)
             if zid is not None:
                 K = int(opt['cond_dim'])
-                oh = torch.zeros((batch.num_graphs, K), device=device)
-                oh[:, int(zid)] = 1.0
-                return oh
-        # dataset-provided path
-        cond = getattr(batch, 'zone_onehot', None)
-        if cond is not None:
-            return cond.to(device)
-        zid = getattr(batch, 'zone_id', None)
-        if zid is not None and int(opt.get('cond_dim', 0)) > 0:
-            K = int(opt['cond_dim'])
-            zid_t = torch.as_tensor(zid, device=device).view(-1)
-            oh = torch.zeros((zid_t.numel(), K), device=device)
-            oh[torch.arange(zid_t.numel(), device=device), zid_t.long()] = 1.0
-            return oh
+                zone_onehot = torch.zeros((batch.num_graphs, K), device=device)
+                zone_onehot[:, int(zid)] = 1.0
+        else:
+            zone_onehot = getattr(batch, 'zone_onehot', None)
+            if zone_onehot is None:
+                zid = getattr(batch, 'zone_id', None)
+                if zid is not None and int(opt.get('cond_dim', 0)) > 0:
+                    K = int(opt['cond_dim'])
+                    zid_t = torch.as_tensor(zid, device=device).view(-1)
+                    zone_onehot = torch.zeros((zid_t.numel(), K), device=device)
+                    zone_onehot[torch.arange(zid_t.numel(), device=device), zid_t.long()] = 1.0
+        if zone_onehot is not None:
+            zone_onehot = _to_tensor(zone_onehot)
+            _log_stats('zone_onehot', zone_onehot)
+            parts.append(zone_onehot)
+
+        road_feats = getattr(batch, 'road_feats', None)
+        if road_feats is not None:
+            road_feats = _to_tensor(road_feats)
+            _log_stats('road_feats', road_feats)
+            parts.append(road_feats)
+
+        templ_part = getattr(batch, 'template_flat_or_cnn', None)
+        if templ_part is not None:
+            templ_part = _to_tensor(templ_part)
+            _log_stats('template_flat_or_cnn', templ_part)
+            parts.append(templ_part)
+
+        if parts:
+            node_cond = torch.cat(parts, dim=1)
+            _log_stats('node_cond total', node_cond)
+            return node_cond
         return None
 
     fn_ct = 0
