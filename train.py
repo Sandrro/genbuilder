@@ -5,6 +5,7 @@ import shutil
 import random
 import logging
 from time import gmtime, strftime
+from tqdm.auto import tqdm
 
 import numpy as np
 import torch
@@ -310,34 +311,39 @@ if __name__ == "__main__":
     print('Start Training...')
     logging.info('Start Training...' )
 
-    for epoch in range(start_epoch, opt['total_epochs']):
-        t_acc, t_loss = train(model, epoch, train_loader, device, opt, loss_dict, optimizer, scheduler)
-        v_acc, v_loss, v_loss_geo = validation(model, epoch, val_loader, device, opt, loss_dict, scheduler)
+    try:
+        for epoch in tqdm(range(start_epoch, opt['total_epochs']), desc='Epoch'):
+            logging.info('Epoch %d/%d', epoch, opt['total_epochs'] - 1)
+            t_acc, t_loss = train(model, epoch, train_loader, device, opt, loss_dict, optimizer, scheduler)
+            v_acc, v_loss, v_loss_geo = validation(model, epoch, val_loader, device, opt, loss_dict, scheduler)
 
-        if opt['save_record']:
-            if best_train_acc is None or t_acc >= best_train_acc:
-                best_train_acc = t_acc
-            if best_train_loss is None or t_loss <= best_train_loss:
-                best_train_loss = t_loss
-            if best_val_acc is None or v_acc >= best_val_acc:
-                best_val_acc = v_acc
-                filn = os.path.join(save_pth, "val_best_extacc.pth")
+            if opt['save_record']:
+                if best_train_acc is None or t_acc >= best_train_acc:
+                    best_train_acc = t_acc
+                if best_train_loss is None or t_loss <= best_train_loss:
+                    best_train_loss = t_loss
+                if best_val_acc is None or v_acc >= best_val_acc:
+                    best_val_acc = v_acc
+                    filn = os.path.join(save_pth, "val_best_extacc.pth")
+                    torch.save(model.state_dict(), filn)
+                if best_val_loss is None or v_loss <= best_val_loss:
+                    best_val_loss = v_loss
+                    filn = os.path.join(save_pth, "val_least_loss_all.pth")
+                    torch.save(model.state_dict(), filn)
+                if best_val_geo_loss is None or v_loss_geo <= best_val_geo_loss:
+                    best_val_geo_loss = v_loss_geo
+                    filn = os.path.join(save_pth, "val_least_loss_geo.pth")
+                    torch.save(model.state_dict(), filn)
+                if epoch % opt['save_epoch'] == 0:
+                    filn = os.path.join(save_pth, str(epoch) + "_save.pth")
+                    torch.save(model.state_dict(), filn)
+                logging.info('Epoch: {:03d}, Train Loss: {:.7f}, Train exist accuracy: {:.7f}, Valid Loss: {:.7f}, Valid exist accuracy: {:.7f}, valid geo loss {:.7f}'.format(epoch, t_loss, t_acc, v_loss, v_acc, v_loss_geo) )
+                print('Epoch: {:03d}, Train Loss: {:.7f}, Train exist accuracy: {:.7f}, Valid Loss: {:.7f}, Valid exist accuracy: {:.7f}, valid geo loss {:.7f}'.format(epoch, t_loss, t_acc, v_loss, v_acc, v_loss_geo) )
+                filn = os.path.join(save_pth, "latest.pth")
                 torch.save(model.state_dict(), filn)
-            if best_val_loss is None or v_loss <= best_val_loss:
-                best_val_loss = v_loss
-                filn = os.path.join(save_pth, "val_least_loss_all.pth")
-                torch.save(model.state_dict(), filn)
-            if best_val_geo_loss is None or v_loss_geo <= best_val_geo_loss:
-                best_val_geo_loss = v_loss_geo
-                filn = os.path.join(save_pth, "val_least_loss_geo.pth")
-                torch.save(model.state_dict(), filn)
-            if epoch % opt['save_epoch'] == 0:
-                filn = os.path.join(save_pth, str(epoch) + "_save.pth")
-                torch.save(model.state_dict(), filn)
-            logging.info('Epoch: {:03d}, Train Loss: {:.7f}, Train exist accuracy: {:.7f}, Valid Loss: {:.7f}, Valid exist accuracy: {:.7f}, valid geo loss {:.7f}'.format(epoch, t_loss, t_acc, v_loss, v_acc, v_loss_geo) )
-            print('Epoch: {:03d}, Train Loss: {:.7f}, Train exist accuracy: {:.7f}, Valid Loss: {:.7f}, Valid exist accuracy: {:.7f}, valid geo loss {:.7f}'.format(epoch, t_loss, t_acc, v_loss, v_acc, v_loss_geo) )
-            filn = os.path.join(save_pth, "latest.pth")
-            torch.save(model.state_dict(), filn)
+    except Exception:
+        logging.exception('Training failed')
+        raise
 
     if opt['save_record']:
         logging.info('Least Train Loss: {:.7f}, Best Train exist accuracy: {:.7f}, Least Valid Loss: {:.7f}, Best Valid exist accuracy: {:.7f}, best valid geo loss {:.7f}'.format(best_train_loss, best_train_acc, best_val_loss, best_val_acc, best_val_geo_loss))

@@ -4,6 +4,8 @@ import numpy as np
 from tensorboard_logger import configure, log_value
 from time import gmtime, strftime
 import warnings
+import logging
+from tqdm.auto import tqdm
 warnings.filterwarnings("ignore")
 
 
@@ -72,7 +74,7 @@ def train(model, epoch, train_loader, device, opt, loss_dict, optimizer, schedul
     batch_size = opt['batch_size']
     num_data = opt['num_data']
 
-    for batch_idx, data in enumerate(train_loader):
+    for batch_idx, data in enumerate(tqdm(train_loader, desc=f"Train {epoch+1}", leave=False)):
         data = data.to(device)
         cond = _make_zone_condition(data, opt, device)  # --- NEW ---
 
@@ -120,6 +122,14 @@ def train(model, epoch, train_loader, device, opt, loss_dict, optimizer, schedul
         ext_acc += correct_ext
         iter_ct += 1
 
+        logging.debug(
+            "train epoch %d batch %d/%d loss=%.6f",
+            epoch,
+            batch_idx,
+            len(train_loader),
+            loss.item(),
+        )
+
     return ext_acc / float(iter_ct), loss_sum / float(iter_ct)
 
 
@@ -134,7 +144,7 @@ def validation(model, epoch, val_loader, device, opt, loss_dict, scheduler):
         num_data = opt['num_data']
         loss_geo = 0.0
 
-        for batch_idx, data in enumerate(val_loader):
+        for batch_idx, data in enumerate(tqdm(val_loader, desc=f"Val {epoch+1}", leave=False)):
             data = data.to(device)
             cond = _make_zone_condition(data, opt, device)  # --- NEW ---
 
@@ -176,5 +186,13 @@ def validation(model, epoch, val_loader, device, opt, loss_dict, scheduler):
             correct_ext = (exist_out == data.x[:, 0].unsqueeze(1)).sum() / torch.numel(data.x[:, 0])
             ext_acc += correct_ext
             iter_ct += 1
+
+            logging.debug(
+                "val epoch %d batch %d/%d loss=%.6f",
+                epoch,
+                batch_idx,
+                len(val_loader),
+                loss.item(),
+            )
 
     return ext_acc / float(iter_ct), loss_all / float(iter_ct), loss_geo / float(iter_ct)
