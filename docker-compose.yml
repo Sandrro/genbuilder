@@ -1,10 +1,10 @@
 services:
   app:
     build: .
+    image: sandrro/genbuilder_vector:0.4
     gpus: all
 
-    # Ключевые правки для PyTorch DataLoader и больших батчей
-    shm_size: "2gb"     # увеличивает /dev/shm внутри контейнера
+    shm_size: 8g
 
     ports:
       - "8005:8000"
