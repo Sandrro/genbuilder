@@ -277,6 +277,30 @@ if __name__ == "__main__":
     val_loader = DataLoader(val_dataset, batch_size=opt['batch_size'], shuffle=False, num_workers=1)
     train_loader = DataLoader(train_dataset, batch_size=opt['batch_size'], shuffle=True, num_workers=1)
 
+    # Determine maximum number of nodes present in training graphs
+    max_nodes = 0
+    for batch in train_loader:
+        nodes = getattr(batch, 'num_nodes', getattr(batch, 'x', torch.empty(0)).shape[0])
+        max_nodes = max(max_nodes, int(nodes))
+
+    # Allow manual override to avoid outlier influence
+    max_nodes_override = opt.get('max_nodes_override')
+    if max_nodes_override is not None:
+        try:
+            max_nodes = min(max_nodes, int(max_nodes_override))
+        except (TypeError, ValueError):
+            pass
+
+    logging.info('Detected max_nodes=%d', max_nodes)
+    print(f"Detected max_nodes {max_nodes}")
+    opt['max_nodes'] = int(max_nodes)
+    N = int(max_nodes)
+    opt['N'] = N
+
+    if opt['save_record']:
+        with open(os.path.join(save_pth, yaml_fn), 'w') as outfile:
+            yaml.dump(opt, outfile, default_flow_style=False)
+
     if opt['is_blockplanner']:
         model = NaiveBlockGenerator(opt, N=N)
     elif opt['is_conditional_block']:
