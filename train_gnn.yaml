@@ -36,6 +36,7 @@ batch_size : 10
 latent_dim: 1024
 template_width : 30
 template_height : 4
+max_nodes_override : null  # manually cap max nodes
 
 
 ################################    weight setting  #########################################################
