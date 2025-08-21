@@ -11,6 +11,7 @@ save_epoch : 5
 val_ratio : 0.2
 total_epochs : 10
 start_epoch : 0
+early_stop_patience : 10
 
 
 ###################################   GlobalMapper setting   #######################################
