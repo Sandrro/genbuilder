@@ -558,7 +558,7 @@ def main():
                     out_path = args.out_dir / out_name
                     data = pickle.dumps(G)
                     table = pa.table({"graph": [data]})
-                    with pa.OSFile(out_path, "wb") as sink:
+                    with pa.OSFile(str(out_path), "wb") as sink:
                         with ipc.new_file(sink, table.schema) as writer:
                             writer.write_table(table)
                     logger.info(
