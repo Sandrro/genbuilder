@@ -63,3 +63,36 @@ def test_infer_accepts_model_repo(tmp_path):
         model_file="model.pt",
     )
     assert len(result["features"]) == 1
+
+
+def test_infer_passes_hf_token(tmp_path, monkeypatch):
+    block = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"id": "b1", "zone": "residential"},
+                "geometry": mapping(block),
+            }
+        ],
+    }
+
+    model_dir = tmp_path / "remote"
+    model_dir.mkdir()
+    (model_dir / "model.pt").write_text("dummy")
+
+    def fake_download(repo, filename, token=None):  # pragma: no cover - simple shim
+        assert token == "secret"
+        return str(model_dir / filename)
+
+    monkeypatch.setattr("inference.hf_hub_download", fake_download)
+
+    result = infer_from_geojson(
+        geojson,
+        block_counts=1,
+        model_repo="some/repo",
+        model_file="model.pt",
+        hf_token="secret",
+    )
+    assert len(result["features"]) == 1

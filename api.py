@@ -100,13 +100,15 @@ async def infer_block(
     counts: str = Form("{}"),
     model_repo: str | None = Form(None),
     model_file: str = Form("model.pt"),
+    hf_token: str | None = Form(None),
 ):
     """Generate building footprints for a block polygon.
 
     ``counts`` may be a JSON object mapping block identifiers to numbers of
     buildings or a single integer applied to every block. ``model_repo`` and
     ``model_file`` optionally point to a model stored on the HuggingFace Hub
-    (or a local directory/file).
+    (or a local directory/file). ``hf_token`` is forwarded when downloading
+    from private repositories.
 
     The uploaded file must contain a GeoJSON FeatureCollection with the block
     polygon. The response is a GeoJSON file with generated building polygons in
@@ -125,7 +127,11 @@ async def infer_block(
 
     try:
         result = infer_from_geojson(
-            geojson, block_counts=counts_data, model_repo=model_repo, model_file=model_file
+            geojson,
+            block_counts=counts_data,
+            model_repo=model_repo,
+            model_file=model_file,
+            hf_token=hf_token,
         )
     except Exception as e:  # pragma: no cover - safe guard
         raise HTTPException(status_code=400, detail=str(e))
