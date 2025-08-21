@@ -52,6 +52,35 @@ def _from_canonical(poly: Polygon, params: dict[str, Any]) -> Polygon:
     return affinity.rotate(unscaled, params["angle"], origin=origin)
 
 
+def _infer_opt_from_state(state_dict: Dict[str, Any]) -> Dict[str, int]:
+    """Derive model hyperparameters from a checkpoint ``state_dict``.
+
+    Parameters
+    ----------
+    state_dict:
+        State dictionary containing at least ``ft_init.weight`` and
+        ``d_ft_init.weight`` tensors.
+
+    Returns
+    -------
+    dict
+        Mapping with inferred ``n_ft_dim`` (latent channels), ``latent_dim``
+        and ``N`` (max number of nodes). Missing keys result in an empty
+        dictionary.
+    """
+
+    try:
+        ft_shape = state_dict["ft_init.weight"].shape
+        latent_ch = ft_shape[0] * 2
+        N = ft_shape[1] - int(0.75 * latent_ch)
+        dft_shape = state_dict["d_ft_init.weight"].shape
+        latent_dim = dft_shape[1]
+    except Exception:
+        return {}
+
+    return {"n_ft_dim": latent_ch, "latent_dim": latent_dim, "N": N}
+
+
 def infer_from_geojson(
     geojson: Dict[str, Any],
     block_counts: Dict[str, int] | int | None = None,
@@ -149,9 +178,15 @@ def infer_from_geojson(
         if ckpt_opt:
             opt = ckpt_opt
         if opt is None:
-            opt = {"device": "cpu", "latent_dim": 64, "n_ft_dim": 64}
+            opt = {}
+
+        inferred = _infer_opt_from_state(state_dict)
+        opt.setdefault("n_ft_dim", inferred.get("n_ft_dim", 64))
+        opt.setdefault("latent_dim", inferred.get("latent_dim", 64))
+        N = opt.pop("N", inferred.get("N", 80))
         opt.setdefault("device", "cpu")
-        model = BlockGenerator(opt)
+
+        model = BlockGenerator(opt, N)
         model.load_state_dict(state_dict)
         model.eval()
 

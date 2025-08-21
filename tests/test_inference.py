@@ -8,7 +8,7 @@ from shapely import affinity
 # ensure root project directory is importable
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from inference import infer_from_geojson
+from inference import infer_from_geojson, _infer_opt_from_state
 
 
 def _dummy_infer_buildings(block, n=5, zone_label=None):
@@ -38,6 +38,17 @@ def _dummy_infer_buildings(block, n=5, zone_label=None):
 class DummyModel:
     def infer(self, block, n=5, zone_label=None):
         return _dummy_infer_buildings(block, n, zone_label)
+
+
+def test_infer_opt_from_state_dict():
+    import types
+
+    state = {
+        "ft_init.weight": types.SimpleNamespace(shape=(128, 448)),
+        "d_ft_init.weight": types.SimpleNamespace(shape=(65536, 1024)),
+    }
+    opt = _infer_opt_from_state(state)
+    assert opt == {"n_ft_dim": 256, "latent_dim": 1024, "N": 256}
 
 
 def test_infer_clips_and_rotates_buildings():
@@ -105,7 +116,7 @@ def test_infer_accepts_model_repo(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
     class Model(DummyModel):
-        def __init__(self, opt):
+        def __init__(self, *args, **kwargs):
             pass
 
         def load_state_dict(self, state):
@@ -148,7 +159,7 @@ def test_infer_passes_hf_token(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
     class Model(DummyModel):
-        def __init__(self, opt):
+        def __init__(self, *args, **kwargs):
             pass
 
         def load_state_dict(self, state):
