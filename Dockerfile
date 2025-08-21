@@ -5,12 +5,15 @@ WORKDIR /app
 
 COPY requirements.txt ./
 
+RUN apt-get update && apt-get install -y build-essential cmake libgmp-dev libmpfr-dev libcgal-dev && rm -rf /var/lib/apt/lists/*
+
 ARG TORCH=2.4.1
 ARG CUDA=cu118
 RUN python -m pip install --upgrade pip && \
     pip install --no-cache-dir \
       torch-scatter==2.1.2 torch-sparse==0.6.18 torch-geometric==2.5.3 \
       -f https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html && \
+    pip install --no-cache-dir --prefer-binary scikit-geometry && \
     pip install --no-cache-dir -r requirements.txt && \
     find /opt/conda -name '__pycache__' -type d -exec rm -rf {} +
 
