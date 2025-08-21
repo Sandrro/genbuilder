@@ -97,6 +97,7 @@ def infer_from_geojson(
     model_file: str = "model.pt",
     hf_token: str | None = None,
     verbose: bool = True,
+    use_dummy: bool = True,
 ) -> Dict[str, Any]:
     """Run model inference for blocks described by GeoJSON.
 
@@ -116,6 +117,9 @@ def infer_from_geojson(
         File name within ``model_repo`` to download. Defaults to ``model.pt``.
     hf_token:
         Optional HuggingFace token used when downloading private repositories.
+    use_dummy:
+        When ``True`` the internal simplified generator is used.  Set to
+        ``False`` to load ``model_repo`` and run inference with the real model.
 
     Returns
     -------
@@ -126,7 +130,9 @@ def infer_from_geojson(
     if not geojson.get("features"):
         raise ValueError("GeoJSON must contain at least one feature")
 
-    if model_repo:
+    model = None
+    model_path = None
+    if model_repo and not use_dummy:
         model_path = model_repo
         if not os.path.isdir(model_repo):
             if hf_hub_download is None:
@@ -134,7 +140,22 @@ def infer_from_geojson(
             model_file = model_file or "model.pt"
             download_kwargs = {"token": hf_token} if hf_token else {}
             model_path = hf_hub_download(model_repo, model_file, **download_kwargs)
-        # Actual model loading is outside the scope of this simplified example.
+        try:  # pragma: no cover - torch not required for tests
+            import torch
+            from model import BlockGenerator  # type: ignore
+
+            state = torch.load(model_path, map_location="cpu")
+            state_dict = state.get("model_state_dict", state)
+            opt = state.get("opt", {"device": "cpu", "latent_dim": 64, "n_ft_dim": 64})
+            opt.setdefault("device", "cpu")
+            model = BlockGenerator(opt)
+            model.load_state_dict(state_dict)
+            model.eval()
+        except Exception as exc:  # pragma: no cover - falls back to dummy
+            if verbose:
+                print(f"Warning: failed to load model from {model_path!r}: {exc}. Using dummy generator.")
+            model = None
+            use_dummy = True
 
     total_blocks = len(geojson["features"])
     processed_blocks = 0
@@ -163,7 +184,18 @@ def infer_from_geojson(
         canon_geom, params = _to_canonical(geom)
         if verbose:
             print(" - generating buildings")
-        buildings = _dummy_infer_buildings(canon_geom, n, zone_label)
+        if use_dummy or model is None:
+            buildings = _dummy_infer_buildings(canon_geom, n, zone_label)
+        else:  # pragma: no cover - real model not used in tests
+            try:
+                if hasattr(model, "infer"):
+                    buildings = model.infer(canon_geom, n=n, zone_label=zone_label)
+                else:
+                    buildings = _dummy_infer_buildings(canon_geom, n, zone_label)
+            except Exception as exc:
+                if verbose:
+                    print(f"Model inference failed: {exc}. Falling back to dummy generator.")
+                buildings = _dummy_infer_buildings(canon_geom, n, zone_label)
         if verbose:
             print(f" - generated {len(buildings)} buildings, transforming back and clipping")
 
