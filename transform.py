@@ -392,6 +392,11 @@ def main():
     )
     ap.add_argument("--strict", action="store_true", help="fail fast on any item error")
     ap.add_argument("--dry-run", action="store_true", help="process but do not write outputs")
+    ap.add_argument(
+        "--skip-single",
+        action="store_true",
+        help="skip graphs with a single node and no edges",
+    )
     args = ap.parse_args()
 
     logger = setup_logger(args.log_level)
@@ -399,7 +404,7 @@ def main():
 
     logger.info("Starting canonical transform")
     logger.info(
-        "Args: raw_dir=%s | out_dir=%s | knn=%d | mask=%d | start_from=%s | workers=%d | timeout_min=%d | strict=%s | dry_run=%s",
+        "Args: raw_dir=%s | out_dir=%s | knn=%d | mask=%d | start_from=%s | workers=%d | timeout_min=%d | strict=%s | dry_run=%s | skip_single=%s",
         str(args.raw_dir),
         str(args.out_dir),
         args.knn,
@@ -409,6 +414,7 @@ def main():
         args.timeout_min,
         args.strict,
         args.dry_run,
+        args.skip_single,
     )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -480,6 +486,9 @@ def main():
 
     ok = 0
     failed = 0
+    skipped_single = 0
+    total_nodes = 0
+    total_edges = 0
 
     # Threaded orchestration of per-block subprocess workers (for timeout safety)
     if tqdm is not None and logger.level <= logging.INFO:
@@ -488,7 +497,7 @@ def main():
         pbar = None
 
     def finalize_result(res: Dict[str, Any]) -> None:
-        nonlocal ok, failed
+        nonlocal ok, failed, skipped_single, total_nodes, total_edges
         basename = res["basename"]
         zone_label = res["zone_label"]
         status = res["status"]
@@ -538,23 +547,29 @@ def main():
             G.graph["zone_id"] = zid
             G.graph["zone_onehot"] = one_hot(zid, K)
 
-            if args.dry_run:
-                logger.info("  • DRY RUN: skipping write for graph %s", basename)
+            if args.skip_single and G.number_of_nodes() == 1 and G.number_of_edges() == 0:
+                skipped_single += 1
+                logger.info("  • Skipping singleton graph (nodes=1, edges=0)")
             else:
-                out_name = f"{basename}.arrow"
-                out_path = args.out_dir / out_name
-                data = pickle.dumps(G)
-                table = pa.table({"graph": [data]})
-                with pa.OSFile(out_path, "wb") as sink:
-                    with ipc.new_file(sink, table.schema) as writer:
-                        writer.write_table(table)
-                logger.info(
-                    "  • Saved %s (nodes=%d, edges=%d)",
-                    out_path.name,
-                    G.number_of_nodes(),
-                    G.number_of_edges(),
-                )
-            ok += 1
+                if args.dry_run:
+                    logger.info("  • DRY RUN: skipping write for graph %s", basename)
+                else:
+                    out_name = f"{basename}.arrow"
+                    out_path = args.out_dir / out_name
+                    data = pickle.dumps(G)
+                    table = pa.table({"graph": [data]})
+                    with pa.OSFile(out_path, "wb") as sink:
+                        with ipc.new_file(sink, table.schema) as writer:
+                            writer.write_table(table)
+                    logger.info(
+                        "  • Saved %s (nodes=%d, edges=%d)",
+                        out_path.name,
+                        G.number_of_nodes(),
+                        G.number_of_edges(),
+                    )
+                ok += 1
+                total_nodes += G.number_of_nodes()
+                total_edges += G.number_of_edges()
         except Exception as e:
             failed += 1
             logger.error("  × Failed on %s during save/annotate: %s", basename, e)
@@ -585,13 +600,28 @@ def main():
     if pbar is not None:
         pbar.close()
 
+    summary = {
+        "processed": len(cache),
+        "saved": ok,
+        "skipped_single": skipped_single,
+        "failed": failed,
+        "total_nodes": total_nodes,
+        "total_edges": total_edges,
+    }
     logger.info(
-        "Done. Processed=%d | OK=%d | Failed=%d | out_dir=%s",
-        len(cache),
-        ok,
-        failed,
+        "Done. Processed=%d | Saved=%d | Skipped=%d | Failed=%d | out_dir=%s",
+        summary["processed"],
+        summary["saved"],
+        summary["skipped_single"],
+        summary["failed"],
         str(args.out_dir),
     )
+    summary_path = args.out_dir / "_summary.json"
+    try:
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("Summary stats saved to %s", summary_path)
+    except Exception as e:
+        logger.error("Failed to write summary stats: %s", e)
     logger.info("Total time: %.2fs", time.perf_counter() - t_start)
 
 

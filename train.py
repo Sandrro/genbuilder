@@ -223,7 +223,12 @@ if __name__ == "__main__":
     torch.autograd.set_detect_anomaly(True)
 
     cnn_transform = get_transform(noise_range=10.0, noise_type='gaussian', isaug=False, rescale_size=64)
-    dataset = UrbanGraphDataset(dataset_path, transform=graph_transform, cnn_transform=cnn_transform)
+    dataset = UrbanGraphDataset(
+        dataset_path,
+        transform=graph_transform,
+        cnn_transform=cnn_transform,
+        skip_single=bool(opt.get('skip_single', False)),
+    )
     num_data = len(dataset)
     opt['num_data'] = int(num_data)
     print(num_data)

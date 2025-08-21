@@ -5,6 +5,7 @@ gpu_ids :
 clean_cache : False
 save_record : True
 is_multigpu : False
+skip_single : False  # skip graphs with 1 node and 0 edges during training
 
 save_epoch : 5
 val_ratio : 0.2
