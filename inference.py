@@ -6,9 +6,12 @@ from shapely.geometry import shape, mapping, Polygon
 from shapely import affinity
 
 try:  # optional dependency used only when a remote model path is provided
-    from huggingface_hub import hf_hub_download
+    from huggingface_hub import hf_hub_download, list_repo_files
 except Exception:  # pragma: no cover - library may not be installed in minimal envs
     hf_hub_download = None  # type: ignore
+    list_repo_files = None  # type: ignore
+
+import yaml
 
 
 def _to_canonical(poly: Polygon) -> tuple[Polygon, dict[str, Any]]:
@@ -54,7 +57,7 @@ def infer_from_geojson(
     block_counts: Dict[str, int] | int | None = None,
     zone_attr: str = "zone",
     model_repo: str | None = None,
-    model_file: str = "model.pt",
+    model_file: str | None = None,
     hf_token: str | None = None,
     model: Any | None = None,
     verbose: bool = True,
@@ -75,7 +78,8 @@ def infer_from_geojson(
         HuggingFace repository id or local directory containing a model. Must
         be provided when ``model`` is not given.
     model_file:
-        File name within ``model_repo`` to load. Defaults to ``model.pt``.
+        Optional file name within ``model_repo`` to load. If omitted the first
+        file with extension ``.pt`` or ``.pth`` is used.
     hf_token:
         Optional HuggingFace token used when downloading private repositories.
     model:
@@ -95,20 +99,57 @@ def infer_from_geojson(
         if not model_repo:
             raise ValueError("model_repo must be provided")
         model_path: str
+        opt: Dict[str, Any] | None = None
         if os.path.isdir(model_repo):
+            if model_file is None:
+                candidates = [
+                    f for f in os.listdir(model_repo) if f.endswith((".pt", ".pth"))
+                ]
+                if not candidates:
+                    raise FileNotFoundError("no model weights found in directory")
+                model_file = sorted(candidates)[0]
             model_path = os.path.join(model_repo, model_file)
+            for yaml_name in ("train_save.yaml", "resume_train_save.yaml"):
+                yaml_path = os.path.join(model_repo, yaml_name)
+                if os.path.isfile(yaml_path):
+                    with open(yaml_path, "r", encoding="utf-8") as fh:
+                        opt = yaml.safe_load(fh) or {}
+                    break
         else:
             if hf_hub_download is None:
                 raise RuntimeError("huggingface_hub not installed")
             download_kwargs = {"token": hf_token} if hf_token else {}
+            if model_file is None:
+                if list_repo_files is None:
+                    raise RuntimeError("huggingface_hub not installed")
+                files = list_repo_files(model_repo, token=hf_token)
+                candidates = [f for f in files if f.endswith((".pt", ".pth"))]
+                if not candidates:
+                    raise FileNotFoundError("no model weights found in repository")
+                model_file = sorted(candidates)[0]
             model_path = hf_hub_download(model_repo, model_file, **download_kwargs)
+            if opt is None:
+                for yaml_name in ("train_save.yaml", "resume_train_save.yaml"):
+                    try:
+                        yaml_path = hf_hub_download(model_repo, yaml_name, **download_kwargs)
+                    except Exception:  # pragma: no cover - file missing
+                        continue
+                    if not os.path.isfile(yaml_path):
+                        continue
+                    with open(yaml_path, "r", encoding="utf-8") as fh:
+                        opt = yaml.safe_load(fh) or {}
+                    break
 
         import torch  # pragma: no cover - torch not required for tests
         from model import BlockGenerator  # type: ignore
 
         state = torch.load(model_path, map_location="cpu")  # pragma: no cover - simple load
         state_dict = state.get("model_state_dict", state)
-        opt = state.get("opt", {"device": "cpu", "latent_dim": 64, "n_ft_dim": 64})
+        ckpt_opt = state.get("opt")
+        if ckpt_opt:
+            opt = ckpt_opt
+        if opt is None:
+            opt = {"device": "cpu", "latent_dim": 64, "n_ft_dim": 64}
         opt.setdefault("device", "cpu")
         model = BlockGenerator(opt)
         model.load_state_dict(state_dict)

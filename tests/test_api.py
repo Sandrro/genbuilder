@@ -184,7 +184,7 @@ def test_infer_block_accepts_model_repo(tmp_path, monkeypatch):
     response = client.post(
         "/infer",
         files=files,
-        data={"counts": "1", "model_repo": str(model_dir), "model_file": "model.pt"},
+        data={"counts": "1", "model_repo": str(model_dir)},
     )
     assert response.status_code == 200
     data = json.loads(response.content)
@@ -218,6 +218,7 @@ def test_infer_block_forwards_hf_token(tmp_path, monkeypatch):
         return str(model_dir / filename)
 
     monkeypatch.setattr("inference.hf_hub_download", fake_download)
+    monkeypatch.setattr("inference.list_repo_files", lambda repo, token=None: ["model.pt"])
 
     _patch_dummy_model(monkeypatch)
 
@@ -227,7 +228,6 @@ def test_infer_block_forwards_hf_token(tmp_path, monkeypatch):
         data={
             "counts": "1",
             "model_repo": "some/repo",
-            "model_file": "model.pt",
             "hf_token": "secret",
         },
     )
