@@ -84,7 +84,6 @@ def test_infer_block_accepts_single_count():
     assert len(data["features"]) == 4
     assert all(f["properties"].get("zone") == "residential" for f in data["features"])
 
-
 def test_infer_block_accepts_model_repo(tmp_path):
     client = TestClient(app)
     input_geojson = {
@@ -116,4 +115,3 @@ def test_infer_block_accepts_model_repo(tmp_path):
     assert data["type"] == "FeatureCollection"
     assert len(data["features"]) == 1
     assert data["features"][0]["properties"].get("zone") == "residential"
-
