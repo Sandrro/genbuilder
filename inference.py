@@ -17,26 +17,45 @@ import yaml
 def _to_canonical(poly: Polygon) -> tuple[Polygon, dict[str, Any]]:
     """Rotate, scale and translate ``poly`` to a canonical unit frame.
 
-    Returns the transformed polygon together with parameters required to
-    invert the transform via :func:`_from_canonical`.
+    The block is rotated so that its longest side becomes horizontal, then it
+    is scaled separately along the X and Y axes using the dimensions of the
+    minimum rotated rectangle (long and short side respectively).  Finally the
+    polygon is translated so that its centroid lies at the origin.
+
+    Returns
+    -------
+    (Polygon, dict)
+        The transformed polygon together with parameters required to invert
+        the transform via :func:`_from_canonical`.
     """
+
     mrr = poly.minimum_rotated_rectangle
     coords = list(mrr.exterior.coords)
     edges = [(coords[i], coords[(i + 1) % 4]) for i in range(4)]
     lengths = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in edges]
-    idx = max(range(4), key=lambda i: lengths[i])
-    a, b = edges[idx]
+
+    idx_long = max(range(4), key=lambda i: lengths[i])
+    idx_short = min(range(4), key=lambda i: lengths[i])
+    a, b = edges[idx_long]
     angle = math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
+
+    long_side = lengths[idx_long]
+    short_side = lengths[idx_short] if lengths[idx_short] > 0 else 1.0
 
     centroid = poly.centroid
     rotated = affinity.rotate(poly, -angle, origin=centroid)
-    long_side = lengths[idx]
-    scaled = affinity.scale(rotated, xfact=1 / long_side, yfact=1 / long_side, origin=centroid)
+    scaled = affinity.scale(
+        rotated,
+        xfact=1 / long_side,
+        yfact=1 / short_side,
+        origin=centroid,
+    )
     shifted_centroid = scaled.centroid
     translated = affinity.translate(scaled, xoff=-shifted_centroid.x, yoff=-shifted_centroid.y)
     params = {
         "angle": angle,
-        "scale": long_side,
+        "scale_x": long_side,
+        "scale_y": short_side,
         "origin": (centroid.x, centroid.y),
         "shift": (shifted_centroid.x, shifted_centroid.y),
     }
@@ -45,10 +64,16 @@ def _to_canonical(poly: Polygon) -> tuple[Polygon, dict[str, Any]]:
 
 def _from_canonical(poly: Polygon, params: dict[str, Any]) -> Polygon:
     """Apply inverse of :func:`_to_canonical` using ``params``."""
+
     xoff, yoff = params["shift"]
     origin = params["origin"]
     unshifted = affinity.translate(poly, xoff=xoff, yoff=yoff)
-    unscaled = affinity.scale(unshifted, xfact=params["scale"], yfact=params["scale"], origin=origin)
+    unscaled = affinity.scale(
+        unshifted,
+        xfact=params.get("scale_x", 1.0),
+        yfact=params.get("scale_y", 1.0),
+        origin=origin,
+    )
     return affinity.rotate(unscaled, params["angle"], origin=origin)
 
 
