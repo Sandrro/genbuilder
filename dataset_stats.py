@@ -1,11 +1,11 @@
 """Compute and save basic statistics for a graph dataset.
 
-This utility iterates over all ``.gpickle`` files in a directory and
-extracts a few aggregated statistics that might be useful for model
-training. The resulting information is written to a JSON file. In
-addition to overall counts the script also groups the same metrics by
-functional zone labels (taken from the ``graph.graph['zone']`` or
-``graph.graph['zone_id']`` attributes).
+This utility iterates over all ``.gpickle`` or ``.arrow`` files in a directory
+and extracts a few aggregated statistics that might be useful for model
+training. The resulting information is written to a JSON file. In addition to
+overall counts the script also groups the same metrics by functional zone
+labels (taken from the ``graph.graph['zone']`` or ``graph.graph['zone_id']``
+attributes).
 
 Usage::
 
@@ -24,6 +24,8 @@ from typing import Dict, List
 
 import numpy as np
 import networkx as nx
+import pyarrow as pa
+import pyarrow.ipc as ipc
 
 
 @dataclass
@@ -40,10 +42,28 @@ class StatBucket:
         return cls(min=float(arr.min()), max=float(arr.max()), mean=float(arr.mean()))
 
 
-def process_directory(directory: str) -> dict:
-    """Compute statistics for graphs stored as ``.gpickle`` files."""
+def _read_graph(path: str) -> nx.Graph:
+    """Load a graph from either a ``.gpickle`` or ``.arrow`` file."""
 
-    files = [f for f in os.listdir(directory) if f.endswith(".gpickle")]
+    if path.endswith(".gpickle"):
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    if path.endswith(".arrow"):
+        with pa.memory_map(path, "rb") as source:
+            table = ipc.open_file(source).read_all()
+        data = table.column("graph")[0].as_py()
+        return pickle.loads(data)
+    raise ValueError(f"Unsupported file extension for {path}")
+
+
+def process_directory(directory: str) -> dict:
+    """Compute statistics for graphs stored as ``.gpickle`` or ``.arrow`` files."""
+
+    files = [
+        f
+        for f in os.listdir(directory)
+        if f.endswith(".gpickle") or f.endswith(".arrow")
+    ]
     node_counts: List[int] = []
     edge_counts: List[int] = []
     areas: List[float] = []
@@ -56,8 +76,7 @@ def process_directory(directory: str) -> dict:
 
     for fname in files:
         path = os.path.join(directory, fname)
-        with open(path, "rb") as f:
-            graph: nx.Graph = pickle.load(f)
+        graph = _read_graph(path)
 
         n_nodes = graph.number_of_nodes()
         n_edges = graph.number_of_edges()
@@ -116,7 +135,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Save dataset statistics to a JSON file"
     )
-    parser.add_argument("--dir", required=True, help="Directory with .gpickle graphs")
+    parser.add_argument(
+        "--dir", required=True, help="Directory with .gpickle or .arrow graphs"
+    )
     parser.add_argument("--out", required=True, help="Where to write resulting JSON")
     args = parser.parse_args()
 
