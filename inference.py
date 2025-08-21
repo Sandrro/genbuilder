@@ -188,6 +188,9 @@ def infer_from_geojson(
 
         model = BlockGenerator(opt, N)
         model.load_state_dict(state_dict)
+        # ensure model parameters reside on the configured device
+        if hasattr(model, "to"):
+            model.to(opt["device"])
         model.eval()
 
     total_blocks = len(geojson["features"])
