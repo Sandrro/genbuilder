@@ -96,6 +96,7 @@ def infer_from_geojson(
     model_repo: str | None = None,
     model_file: str = "model.pt",
     hf_token: str | None = None,
+    verbose: bool = True,
 ) -> Dict[str, Any]:
     """Run model inference for blocks described by GeoJSON.
 
@@ -135,6 +136,11 @@ def infer_from_geojson(
             model_path = hf_hub_download(model_repo, model_file, **download_kwargs)
         # Actual model loading is outside the scope of this simplified example.
 
+    total_blocks = len(geojson["features"])
+    processed_blocks = 0
+    if verbose:
+        print(f"Starting generation for {total_blocks} blocks")
+
     features: List[Dict[str, Any]] = []
 
     count_map: Dict[str, int] = {}
@@ -151,8 +157,15 @@ def infer_from_geojson(
         zone_label = props.get(zone_attr)
         n = count_map.get(block_id, default_n)
 
+        if verbose:
+            print(f"Processing block {processed_blocks + 1}/{total_blocks} (id={block_id})")
+            print(" - canonicalising geometry")
         canon_geom, params = _to_canonical(geom)
+        if verbose:
+            print(" - generating buildings")
         buildings = _dummy_infer_buildings(canon_geom, n, zone_label)
+        if verbose:
+            print(f" - generated {len(buildings)} buildings, transforming back and clipping")
 
         for b in buildings:
             world_b = _from_canonical(b, params)
@@ -163,6 +176,13 @@ def infer_from_geojson(
             features.append(
                 {"type": "Feature", "properties": b_props, "geometry": mapping(clipped)}
             )
+
+        processed_blocks += 1
+        if verbose:
+            print(f"Finished block {block_id}. Progress: {processed_blocks}/{total_blocks}")
+
+    if verbose:
+        print(f"Generation finished. Processed {processed_blocks} blocks in total")
 
     result: Dict[str, Any] = {"type": "FeatureCollection", "features": features}
     if "crs" in geojson:
