@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import MultiStepLR
 from torch_geometric.data import Data, Batch
 from torch_geometric.loader import DataLoader, DataListLoader
+from torch.utils.data import WeightedRandomSampler
 
 from urban_dataset import UrbanGraphDataset, graph_transform, get_transform
 from model import *
@@ -280,7 +281,21 @@ if __name__ == "__main__":
     val_dataset = dataset[val_idx]
     train_dataset = dataset[train_idx]
     val_loader = DataLoader(val_dataset, batch_size=opt['batch_size'], shuffle=False)
-    train_loader = DataLoader(train_dataset, batch_size=opt['batch_size'], shuffle=True)
+
+    # Compute per-sample weights based on zone_id for balancing
+    if have_labels:
+        train_labels = np.array([labels[i] for i in train_idx])
+        unique, counts = np.unique(train_labels, return_counts=True)
+        class_weights = {c: 1.0 / cnt for c, cnt in zip(unique, counts)}
+        sample_weights = np.array([class_weights[c] for c in train_labels], dtype=np.float32)
+        train_sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)
+    else:
+        train_sampler = None
+
+    if train_sampler is not None:
+        train_loader = DataLoader(train_dataset, batch_size=opt['batch_size'], sampler=train_sampler)
+    else:
+        train_loader = DataLoader(train_dataset, batch_size=opt['batch_size'], shuffle=True)
 
     # Determine maximum number of nodes present in training graphs
     max_nodes = 0
