@@ -99,16 +99,17 @@ async def infer_block(
     file: UploadFile = File(...),
     counts: str = Form("{}"),
     model_repo: str = Form(...),
-    model_file: str = Form("model.pt"),
+    model_file: str | None = Form(None),
     hf_token: str | None = Form(None),
 ):
     """Generate building footprints for a block polygon.
 
     ``counts`` may be a JSON object mapping block identifiers to numbers of
-    buildings or a single integer applied to every block. ``model_repo`` and
-    ``model_file`` optionally point to a model stored on the HuggingFace Hub
-    (or a local directory/file). ``hf_token`` is forwarded when downloading
-    from private repositories.
+    buildings or a single integer applied to every block. ``model_repo``
+    optionally points to a model stored on the HuggingFace Hub (or a local
+    directory). If ``model_file`` is not provided the first weights file in the
+    repository is used. ``hf_token`` is forwarded when downloading from private
+    repositories.
 
     The uploaded file must contain a GeoJSON FeatureCollection with the block
     polygon. The response is a GeoJSON file with generated building polygons in

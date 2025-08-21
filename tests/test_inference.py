@@ -125,7 +125,6 @@ def test_infer_accepts_model_repo(tmp_path, monkeypatch):
         geojson,
         block_counts=1,
         model_repo=str(model_dir),
-        model_file="model.pt",
     )
     assert len(result["features"]) == 1
 
@@ -170,12 +169,14 @@ def test_infer_passes_hf_token(tmp_path, monkeypatch):
         return str(model_dir / filename)
 
     monkeypatch.setattr("inference.hf_hub_download", fake_download)
+    monkeypatch.setattr(
+        "inference.list_repo_files", lambda repo, token=None: ["model.pt"]
+    )
 
     result = infer_from_geojson(
         geojson,
         block_counts=1,
         model_repo="some/repo",
-        model_file="model.pt",
         hf_token="secret",
     )
     assert len(result["features"]) == 1
