@@ -10,6 +10,21 @@ from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch.nn.parameter import UninitializedParameter
 from shapely.geometry import Polygon
+import numpy as np
+
+
+def block_long_side(block: Polygon) -> float:
+    """Return the length of the longer side of the block's minimum rotated rectangle."""
+    mrr = block.minimum_rotated_rectangle
+    coords = list(mrr.exterior.coords)
+
+    def dist(a, b):
+        return float(np.hypot(b[0] - a[0], b[1] - a[1]))
+
+    a0, a1, a2, a3 = coords[0], coords[1], coords[2], coords[3]
+    e1 = dist(a0, a1)
+    e2 = dist(a1, a2)
+    return max(e1, e2)
 
 
 class NaiveMsgPass(MessagePassing):
@@ -248,8 +263,6 @@ class BlockGenerator(nn.Module):
             Optional zoning label used for conditioning when a zone mapping is
             available.
         """
-
-        from transform import block_long_side  # avoid heavy import at module load
 
         long_side = float(block_long_side(block))
 
