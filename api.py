@@ -98,6 +98,9 @@ def start_train(req: TrainRequest):
 async def infer_block(file: UploadFile = File(...), counts: str = Form("{}")):
     """Generate building footprints for a block polygon.
 
+    ``counts`` may be a JSON object mapping block identifiers to numbers of
+    buildings or a single integer applied to every block.
+
     The uploaded file must contain a GeoJSON FeatureCollection with the block
     polygon. The response is a GeoJSON file with generated building polygons in
     the same CRS as the input.
@@ -109,12 +112,12 @@ async def infer_block(file: UploadFile = File(...), counts: str = Form("{}")):
         raise HTTPException(status_code=400, detail="invalid GeoJSON")
 
     try:
-        counts_dict = json.loads(counts) if counts else {}
+        counts_data = json.loads(counts) if counts else {}
     except Exception:
         raise HTTPException(status_code=400, detail="invalid counts")
 
     try:
-        result = infer_from_geojson(geojson, block_counts=counts_dict)
+        result = infer_from_geojson(geojson, block_counts=counts_data)
     except Exception as e:  # pragma: no cover - safe guard
         raise HTTPException(status_code=400, detail=str(e))
 

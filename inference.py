@@ -44,7 +44,7 @@ def _dummy_infer_buildings(block: Polygon, n: int = 5, zone_label: str | None = 
 
 def infer_from_geojson(
     geojson: Dict[str, Any],
-    block_counts: Dict[str, int] | None = None,
+    block_counts: Dict[str, int] | int | None = None,
     zone_attr: str = "zone",
 ) -> Dict[str, Any]:
     """Run model inference for blocks described by GeoJSON.
@@ -54,8 +54,9 @@ def infer_from_geojson(
     geojson:
         A GeoJSON FeatureCollection with Polygon features representing blocks.
     block_counts:
-        Optional mapping from block identifiers to the number of buildings that
-        should be generated for each block.
+        Either a mapping from block identifiers to the number of buildings to
+        generate for each block or a single integer applied to every block. If
+        omitted, 5 buildings per block are generated.
     zone_attr:
         Name of the property on each block feature that stores the zone label.
 
@@ -69,17 +70,28 @@ def infer_from_geojson(
         raise ValueError("GeoJSON must contain at least one feature")
 
     features: List[Dict[str, Any]] = []
+
+    count_map: Dict[str, int] = {}
+    default_n = 5
+    if isinstance(block_counts, int):
+        default_n = block_counts
+    elif isinstance(block_counts, dict):
+        count_map = block_counts
+
     for feat in geojson["features"]:
         geom = shape(feat["geometry"])
         props = feat.get("properties", {})
         block_id = str(props.get("id") or feat.get("id") or "")
         zone_label = props.get(zone_attr)
-        n = block_counts.get(block_id, 5) if block_counts else 5
+        n = count_map.get(block_id, default_n)
         buildings = _dummy_infer_buildings(geom, n, zone_label)
         for b in buildings:
+            clipped = b.intersection(geom)
+            if clipped.is_empty:
+                continue
             b_props = {zone_attr: zone_label, "block_id": block_id}
             features.append(
-                {"type": "Feature", "properties": b_props, "geometry": mapping(b)}
+                {"type": "Feature", "properties": b_props, "geometry": mapping(clipped)}
             )
 
     result: Dict[str, Any] = {"type": "FeatureCollection", "features": features}
