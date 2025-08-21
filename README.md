@@ -89,14 +89,23 @@ Artifacts and logs are written to the host `epoch/`, `logs/` and
 
 ## Inference Docker Image
 
-For running inference without the API server, build the dedicated image:
+For a lightweight inference API server, build and run the dedicated image:
 
 ```bash
 docker build -f Dockerfile.inference -t genbuilder-inference .
+docker run --rm -p 8000:8000 genbuilder-inference
 ```
 
 The image installs all system libraries required to compile
-`scikit-geometry`, enabling geometry-aware inference pipelines.
+`scikit-geometry` and exposes the same `/infer` endpoint as the main
+container. For example, you can send a block GeoJSON and receive generated
+buildings:
+
+```bash
+curl -X POST http://localhost:8000/infer \
+     -F "file=@block.geojson" \
+     -F "model_repo=<hf_model_repo>"
+```
 
 
 

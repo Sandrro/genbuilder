@@ -25,5 +25,5 @@ RUN python -m pip install --upgrade pip && \
     find /opt/conda -name '__pycache__' -type d -exec rm -rf {} +
 
 COPY . .
-
-ENTRYPOINT ["python", "inference.py"]
+EXPOSE 8000
+ENTRYPOINT ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
