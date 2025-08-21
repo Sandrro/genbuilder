@@ -171,13 +171,14 @@ if __name__ == "__main__":
     start_epoch = opt['start_epoch']
 
     loss_dict = {}
-    loss_dict['Posloss'] = nn.MSELoss(reduction='sum')
-    loss_dict['ShapeCEloss'] = nn.CrossEntropyLoss(reduction='sum')
-    loss_dict['Iouloss'] = nn.MSELoss(reduction='sum')
-    loss_dict['ExistBCEloss'] = nn.BCEWithLogitsLoss(reduction='sum')
+    # use mean reduction for more interpretable loss values
+    loss_dict['Posloss'] = nn.MSELoss(reduction='mean')
+    loss_dict['ShapeCEloss'] = nn.CrossEntropyLoss(reduction='mean')
+    loss_dict['Iouloss'] = nn.MSELoss(reduction='mean')
+    loss_dict['ExistBCEloss'] = nn.BCEWithLogitsLoss(reduction='mean')
     loss_dict['CELoss'] = nn.CrossEntropyLoss(reduction='none')
-    loss_dict['Sizeloss'] = nn.MSELoss(reduction='sum')  # nn.SmoothL1Loss
-    loss_dict['ExtSumloss'] = nn.MSELoss(reduction='sum')  # nn.SmoothL1Loss
+    loss_dict['Sizeloss'] = nn.MSELoss(reduction='mean')  # nn.SmoothL1Loss
+    loss_dict['ExtSumloss'] = nn.MSELoss(reduction='mean')  # nn.SmoothL1Loss
 
     save_pth = os.path.join(root, 'epoch'); os.makedirs(save_pth, exist_ok=True)
     log_pth = os.path.join(root, 'tensorboard'); os.makedirs(log_pth, exist_ok=True)
@@ -356,35 +357,62 @@ if __name__ == "__main__":
     logging.info('Start Training...' )
 
     try:
+        patience = int(opt.get('early_stop_patience', 0))
+        no_improve = 0
+        best_val_loss = None
         for epoch in tqdm(range(start_epoch, opt['total_epochs']), desc='Epoch'):
             logging.info('Epoch %d/%d', epoch, opt['total_epochs'] - 1)
-            t_acc, t_loss = train(model, epoch, train_loader, device, opt, loss_dict, optimizer, scheduler)
-            v_acc, v_loss, v_loss_geo = validation(model, epoch, val_loader, device, opt, loss_dict, scheduler)
+            t_acc, t_loss, t_zone_acc, t_geo = train(model, epoch, train_loader, device, opt, loss_dict, optimizer, scheduler)
+            v_acc, v_loss, v_loss_geo, v_zone_acc, v_geo = validation(model, epoch, val_loader, device, opt, loss_dict, scheduler)
 
-            if opt['save_record']:
-                if best_train_acc is None or t_acc >= best_train_acc:
-                    best_train_acc = t_acc
-                if best_train_loss is None or t_loss <= best_train_loss:
-                    best_train_loss = t_loss
-                if best_val_acc is None or v_acc >= best_val_acc:
-                    best_val_acc = v_acc
+            if best_train_acc is None or t_acc >= best_train_acc:
+                best_train_acc = t_acc
+            if best_train_loss is None or t_loss <= best_train_loss:
+                best_train_loss = t_loss
+            if best_val_acc is None or v_acc >= best_val_acc:
+                best_val_acc = v_acc
+                if opt['save_record']:
                     filn = os.path.join(save_pth, "val_best_extacc.pth")
                     torch.save(model.state_dict(), filn)
-                if best_val_loss is None or v_loss <= best_val_loss:
-                    best_val_loss = v_loss
+
+            if best_val_loss is None or v_loss <= best_val_loss:
+                best_val_loss = v_loss
+                no_improve = 0
+                if opt['save_record']:
                     filn = os.path.join(save_pth, "val_least_loss_all.pth")
                     torch.save(model.state_dict(), filn)
-                if best_val_geo_loss is None or v_loss_geo <= best_val_geo_loss:
-                    best_val_geo_loss = v_loss_geo
+            else:
+                no_improve += 1
+
+            if best_val_geo_loss is None or v_loss_geo <= best_val_geo_loss:
+                best_val_geo_loss = v_loss_geo
+                if opt['save_record']:
                     filn = os.path.join(save_pth, "val_least_loss_geo.pth")
                     torch.save(model.state_dict(), filn)
-                if epoch % opt['save_epoch'] == 0:
-                    filn = os.path.join(save_pth, str(epoch) + "_save.pth")
-                    torch.save(model.state_dict(), filn)
-                logging.info('Epoch: {:03d}, Train Loss: {:.7f}, Train exist accuracy: {:.7f}, Valid Loss: {:.7f}, Valid exist accuracy: {:.7f}, valid geo loss {:.7f}'.format(epoch, t_loss, t_acc, v_loss, v_acc, v_loss_geo) )
-                print('Epoch: {:03d}, Train Loss: {:.7f}, Train exist accuracy: {:.7f}, Valid Loss: {:.7f}, Valid exist accuracy: {:.7f}, valid geo loss {:.7f}'.format(epoch, t_loss, t_acc, v_loss, v_acc, v_loss_geo) )
+
+            if opt['save_record'] and epoch % opt['save_epoch'] == 0:
+                filn = os.path.join(save_pth, str(epoch) + "_save.pth")
+                torch.save(model.state_dict(), filn)
+
+            zone_msg = ', '.join(f"{z}:{acc:.4f}" for z, acc in sorted(v_zone_acc.items()))
+            train_zone_msg = ', '.join(f"{z}:{acc:.4f}" for z, acc in sorted(t_zone_acc.items()))
+            geo_msg = f"pos {v_geo['pos']:.7f}, size {v_geo['size']:.7f}, shape {v_geo['shape']:.7f}, iou {v_geo['iou']:.7f}"
+            logging.info('Epoch: {:03d}, Train Loss: {:.7f}, Train exist accuracy: {:.7f}, Valid Loss: {:.7f}, Valid exist accuracy: {:.7f}, valid geo loss {:.7f} ({})'.format(epoch, t_loss, t_acc, v_loss, v_acc, v_loss_geo, geo_msg))
+            if train_zone_msg:
+                logging.info('Per-zone train accuracy: %s', train_zone_msg)
+            if zone_msg:
+                logging.info('Per-zone val accuracy: %s', zone_msg)
+            print('Epoch: {:03d}, Train Loss: {:.7f}, Train exist accuracy: {:.7f}, Valid Loss: {:.7f}, Valid exist accuracy: {:.7f}, valid geo loss {:.7f} ({})'.format(epoch, t_loss, t_acc, v_loss, v_acc, v_loss_geo, geo_msg))
+            if train_zone_msg:
+                print('Per-zone train accuracy:', train_zone_msg)
+            if zone_msg:
+                print('Per-zone val accuracy:', zone_msg)
+            if opt['save_record']:
                 filn = os.path.join(save_pth, "latest.pth")
                 torch.save(model.state_dict(), filn)
+            if patience > 0 and no_improve >= patience:
+                logging.info('Early stopping triggered at epoch %d', epoch)
+                break
     except Exception:
         logging.exception('Training failed')
         raise

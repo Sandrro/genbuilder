@@ -1,6 +1,7 @@
 import torch, os
 import torch.nn.functional as F
 import numpy as np
+from collections import defaultdict
 from tensorboard_logger import configure, log_value
 from time import gmtime, strftime
 import warnings
@@ -71,6 +72,9 @@ def train(model, epoch, train_loader, device, opt, loss_dict, optimizer, schedul
     loss_sum = 0
     ext_acc = 0
     iter_ct = 0
+    zone_correct = defaultdict(int)
+    zone_total = defaultdict(int)
+    geo_pos = geo_size = geo_shape = geo_iou = 0.0
     batch_size = opt['batch_size']
     num_data = opt['num_data']
 
@@ -104,6 +108,10 @@ def train(model, epoch, train_loader, device, opt, loss_dict, optimizer, schedul
 
         loss.backward()
         loss_sum += loss.item()
+        geo_pos += pos_loss.item()
+        geo_size += size_loss.item()
+        geo_shape += shape_loss.item()
+        geo_iou += iou_loss.item()
         optimizer.step()
         scheduler.step()
 
@@ -118,9 +126,18 @@ def train(model, epoch, train_loader, device, opt, loss_dict, optimizer, schedul
             log_value('train/shape_loss', shape_loss.item(), step)
             log_value('train/bldg_iou_loss', iou_loss.item(), step)
 
-        correct_ext = (exist_out == data.x[:, 0].unsqueeze(1)).sum() / torch.numel(data.x[:, 0])
+        correct_mask = (exist_out == data.x[:, 0].unsqueeze(1))
+        correct_ext = correct_mask.sum() / torch.numel(data.x[:, 0])
         ext_acc += correct_ext
         iter_ct += 1
+
+        # per-zone accuracy
+        zone_ids = getattr(data, 'zone_id', None)
+        if zone_ids is not None:
+            for g_idx, zid in enumerate(zone_ids.tolist()):
+                node_mask = (data.batch == g_idx)
+                zone_correct[zid] += correct_mask[node_mask].sum().item()
+                zone_total[zid] += int(node_mask.sum().item())
 
         logging.debug(
             "train epoch %d batch %d/%d loss=%.6f",
@@ -130,7 +147,15 @@ def train(model, epoch, train_loader, device, opt, loss_dict, optimizer, schedul
             loss.item(),
         )
 
-    return ext_acc / float(iter_ct), loss_sum / float(iter_ct)
+    zone_acc = {z: zone_correct[z] / zone_total[z] for z in zone_correct}
+    geo_breakdown = {
+        'pos': geo_pos / float(iter_ct),
+        'size': geo_size / float(iter_ct),
+        'shape': geo_shape / float(iter_ct),
+        'iou': geo_iou / float(iter_ct),
+    }
+
+    return ext_acc / float(iter_ct), loss_sum / float(iter_ct), zone_acc, geo_breakdown
 
 
 
@@ -143,6 +168,9 @@ def validation(model, epoch, val_loader, device, opt, loss_dict, scheduler):
         batch_size = opt['batch_size']
         num_data = opt['num_data']
         loss_geo = 0.0
+        zone_correct = defaultdict(int)
+        zone_total = defaultdict(int)
+        geo_pos = geo_size = geo_shape = geo_iou = 0.0
 
         for batch_idx, data in enumerate(tqdm(val_loader, desc=f"Val {epoch+1}", leave=False)):
             data = data.to(device)
@@ -171,6 +199,10 @@ def validation(model, epoch, val_loader, device, opt, loss_dict, scheduler):
 
             loss_all += loss.item()
             loss_geo += (pos_loss.item() + size_loss.item())
+            geo_pos += pos_loss.item()
+            geo_size += size_loss.item()
+            geo_shape += shape_loss.item()
+            geo_iou += iou_loss.item()
 
             if opt['save_record']:
                 step = int(epoch * (num_data / batch_size) + batch_idx)
@@ -183,9 +215,17 @@ def validation(model, epoch, val_loader, device, opt, loss_dict, scheduler):
                 log_value('val/val_shape_loss', shape_loss.item(), step)
                 log_value('val/val_bldg_iou_loss', iou_loss.item(), step)
 
-            correct_ext = (exist_out == data.x[:, 0].unsqueeze(1)).sum() / torch.numel(data.x[:, 0])
+            correct_mask = (exist_out == data.x[:, 0].unsqueeze(1))
+            correct_ext = correct_mask.sum() / torch.numel(data.x[:, 0])
             ext_acc += correct_ext
             iter_ct += 1
+
+            zone_ids = getattr(data, 'zone_id', None)
+            if zone_ids is not None:
+                for g_idx, zid in enumerate(zone_ids.tolist()):
+                    node_mask = (data.batch == g_idx)
+                    zone_correct[zid] += correct_mask[node_mask].sum().item()
+                    zone_total[zid] += int(node_mask.sum().item())
 
             logging.debug(
                 "val epoch %d batch %d/%d loss=%.6f",
@@ -195,4 +235,12 @@ def validation(model, epoch, val_loader, device, opt, loss_dict, scheduler):
                 loss.item(),
             )
 
-    return ext_acc / float(iter_ct), loss_all / float(iter_ct), loss_geo / float(iter_ct)
+    zone_acc = {z: zone_correct[z] / zone_total[z] for z in zone_correct}
+    geo_breakdown = {
+        'pos': geo_pos / float(iter_ct),
+        'size': geo_size / float(iter_ct),
+        'shape': geo_shape / float(iter_ct),
+        'iou': geo_iou / float(iter_ct),
+    }
+
+    return ext_acc / float(iter_ct), loss_all / float(iter_ct), loss_geo / float(iter_ct), zone_acc, geo_breakdown
