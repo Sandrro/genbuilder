@@ -45,7 +45,7 @@ def _dummy_infer_buildings(block, n=5, zone_label=None):
 
 
 class DummyModel:
-    def __init__(self, opt=None):
+    def __init__(self, *args, **kwargs):
         pass
 
     def load_state_dict(self, state):
