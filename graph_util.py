@@ -33,18 +33,20 @@ def sparse_generate_graph_from_ftsarray(height, width, x_pos, y_pos, h_out, w_ou
     G.graph['aspect_ratio'] = asp_rto
     G.graph['long_side'] = long_side
 
+    scale = float(long_side) if float(long_side) > 0 else 1.0
+
     if b_height is None:
         b_height = np.zeros_like(b_iou)
 
     for i in range(height):
         for j in range(width):
             idx = i * width + j
-            G.nodes[idx]['posy'] = y_pos[idx]
-            G.nodes[idx]['posx'] = x_pos[idx]
+            G.nodes[idx]['posy'] = y_pos[idx] * scale
+            G.nodes[idx]['posx'] = x_pos[idx] * scale
             G.nodes[idx]['exist'] = exist[idx]
             G.nodes[idx]['merge'] = 0
-            G.nodes[idx]['size_x'] = w_out[idx]
-            G.nodes[idx]['size_y'] = h_out[idx]
+            G.nodes[idx]['size_x'] = w_out[idx] * scale
+            G.nodes[idx]['size_y'] = h_out[idx] * scale
             G.nodes[idx]['shape'] = b_shape[idx]
             G.nodes[idx]['iou'] = b_iou[idx]
             G.nodes[idx]['height'] = b_height[idx]
