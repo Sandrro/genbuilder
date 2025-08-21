@@ -115,3 +115,44 @@ def test_infer_block_accepts_model_repo(tmp_path):
     assert data["type"] == "FeatureCollection"
     assert len(data["features"]) == 1
     assert data["features"][0]["properties"].get("zone") == "residential"
+
+
+def test_infer_block_forwards_hf_token(tmp_path, monkeypatch):
+    client = TestClient(app)
+    input_geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"id": "b1", "zone": "residential"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]],
+                },
+            }
+        ],
+    }
+    files = {"file": ("block.geojson", json.dumps(input_geojson), "application/geo+json")}
+    model_dir = tmp_path / "remote"
+    model_dir.mkdir()
+    (model_dir / "model.pt").write_text("dummy")
+
+    def fake_download(repo, filename, token=None):  # pragma: no cover - simple shim
+        assert token == "secret"
+        return str(model_dir / filename)
+
+    monkeypatch.setattr("inference.hf_hub_download", fake_download)
+
+    response = client.post(
+        "/infer",
+        files=files,
+        data={
+            "counts": "1",
+            "model_repo": "some/repo",
+            "model_file": "model.pt",
+            "hf_token": "secret",
+        },
+    )
+    assert response.status_code == 200
+    data = json.loads(response.content)
+    assert len(data["features"]) == 1

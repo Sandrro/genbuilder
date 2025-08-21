@@ -95,6 +95,7 @@ def infer_from_geojson(
     zone_attr: str = "zone",
     model_repo: str | None = None,
     model_file: str = "model.pt",
+    hf_token: str | None = None,
 ) -> Dict[str, Any]:
     """Run model inference for blocks described by GeoJSON.
 
@@ -108,6 +109,12 @@ def infer_from_geojson(
         omitted, 5 buildings per block are generated.
     zone_attr:
         Name of the property on each block feature that stores the zone label.
+    model_repo:
+        Optional HuggingFace repository id or local directory containing a model.
+    model_file:
+        File name within ``model_repo`` to download. Defaults to ``model.pt``.
+    hf_token:
+        Optional HuggingFace token used when downloading private repositories.
 
     Returns
     -------
@@ -123,7 +130,9 @@ def infer_from_geojson(
         if not os.path.isdir(model_repo):
             if hf_hub_download is None:
                 raise RuntimeError("huggingface_hub not installed")
-            model_path = hf_hub_download(model_repo, model_file)
+            model_file = model_file or "model.pt"
+            download_kwargs = {"token": hf_token} if hf_token else {}
+            model_path = hf_hub_download(model_repo, model_file, **download_kwargs)
         # Actual model loading is outside the scope of this simplified example.
 
     features: List[Dict[str, Any]] = []
