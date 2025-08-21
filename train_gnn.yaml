@@ -38,6 +38,7 @@ latent_dim: 1024
 template_width : 30
 template_height : 4
 max_nodes_override : null  # manually cap max nodes
+dropout_p : 0.1
 
 
 ################################    weight setting  #########################################################

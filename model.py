@@ -79,6 +79,10 @@ class BlockGenerator(nn.Module):
 
         self.d_ft_init = nn.Linear(self.latent_dim, self.latent_ch * self.N)
 
+        # Dropout probability for residual blocks
+        self.dropout_p = float(opt.get('dropout_p', 0.1))
+        self.dropout = nn.Dropout(self.dropout_p)
+
         # Aggregate: g0(2*ch) + g1..g3(ch each) → 5*ch
         self.aggregate = nn.Linear(int(self.latent_ch * (2.0 + 3.0)), self.latent_dim)
 
@@ -133,6 +137,13 @@ class BlockGenerator(nn.Module):
         eps = torch.randn_like(std)
         return eps * std + mu
 
+    def _conv_dropout_residual(self, conv, x, edge_index):
+        """Apply conv → ReLU → Dropout → (optional) residual."""
+        out = self.dropout(F.relu(conv(x, edge_index)))
+        if out.shape == x.shape:
+            out = x + out
+        return out
+
     # ---------- encoder/decoder ----------
     def encode(self, data, cond=None):
         x, edge_index = data.x, data.edge_index
@@ -174,9 +185,9 @@ class BlockGenerator(nn.Module):
         ft = F.relu(self.ft_init(x))
 
         n0 = torch.cat((shape_feature, size, pos, ft), 1)
-        n1 = F.relu(self.e_conv1(n0, edge_index))
-        n2 = F.relu(self.e_conv2(n1, edge_index))
-        n3 = F.relu(self.e_conv3(n2, edge_index))
+        n1 = self._conv_dropout_residual(self.e_conv1, n0, edge_index)
+        n2 = self._conv_dropout_residual(self.e_conv2, n1, edge_index)
+        n3 = self._conv_dropout_residual(self.e_conv3, n2, edge_index)
 
         g0 = self.global_pool(n0, data.batch)
         g1 = self.global_pool(n1, data.batch)
@@ -195,9 +206,9 @@ class BlockGenerator(nn.Module):
         one_hot = self._one_hot_nodes(B, node_cnt)
         z = torch.cat([z, one_hot], 1)
 
-        d1 = F.relu(self.d_conv1(z, edge_index))
-        d2 = F.relu(self.d_conv2(d1, edge_index))
-        d3 = F.relu(self.d_conv3(d2, edge_index))
+        d1 = self._conv_dropout_residual(self.d_conv1, z, edge_index)
+        d2 = self._conv_dropout_residual(self.d_conv2, d1, edge_index)
+        d3 = self._conv_dropout_residual(self.d_conv3, d2, edge_index)
 
         exist = self.d_exist_1(F.relu(self.d_exist_0(d3)))
         posx = self.d_posx_1(F.relu(self.d_posx_0(d3)))
@@ -342,9 +353,9 @@ class AttentionBlockGenerator_independent(AttentionBlockGenerator):
         ft = F.relu(self.ft_init(x))
 
         n0 = torch.cat((shape_feature, size, pos, ft), 1)
-        n1 = F.relu(self.e_conv1(n0, edge_index))
-        n2 = F.relu(self.e_conv2(n1, edge_index))
-        n3 = F.relu(self.e_conv3(n2, edge_index))
+        n1 = self._conv_dropout_residual(self.e_conv1, n0, edge_index)
+        n2 = self._conv_dropout_residual(self.e_conv2, n1, edge_index)
+        n3 = self._conv_dropout_residual(self.e_conv3, n2, edge_index)
 
         g0 = self.global_pool(n0, data.batch)
         g1 = self.global_pool(n1, data.batch)
@@ -363,9 +374,9 @@ class AttentionBlockGenerator_independent(AttentionBlockGenerator):
         z = self.d_ft_init(z).view(B * self.N, -1)[:node_cnt]
         one_hot = self._one_hot_nodes(B, node_cnt)
         z = torch.cat([z, one_hot], 1)
-        d1 = F.relu(self.d_conv1(z, edge_index))
-        d2 = F.relu(self.d_conv2(d1, edge_index))
-        d3 = F.relu(self.d_conv3(d2, edge_index))
+        d1 = self._conv_dropout_residual(self.d_conv1, z, edge_index)
+        d2 = self._conv_dropout_residual(self.d_conv2, d1, edge_index)
+        d3 = self._conv_dropout_residual(self.d_conv3, d2, edge_index)
         exist = self.d_exist_1(d3)
         posx = self.d_posx_1(F.relu(self.d_posx_0(d3)))
         posy = self.d_posy_1(F.relu(self.d_posy_0(d3)))
