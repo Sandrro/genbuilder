@@ -288,8 +288,15 @@ class UrbanGraphDataset(Dataset):
     the dataset as already processed (`process()` is a no-op).
     """
 
-    def __init__(self, root: str, transform=None, pre_transform=None,
-                 cnn_transform=None, is_multigpu: bool = False):
+    def __init__(
+        self,
+        root: str,
+        transform=None,
+        pre_transform=None,
+        cnn_transform=None,
+        is_multigpu: bool = False,
+        skip_single: bool = False,
+    ):
         # Build absolute root first; PyG may access dirs in super().__init__
         self._root_abs = os.path.abspath(root)
 
@@ -300,6 +307,7 @@ class UrbanGraphDataset(Dataset):
             transforms.Normalize((0.5,), (0.25,)),
         ])
         self.base_transform = transforms.Compose([transforms.ToTensor()])
+        self.skip_single = bool(skip_single)
 
         # Gather all arrow/parquet files BEFORE calling super().__init__
         self.arrow_paths: List[str] = []
@@ -324,6 +332,11 @@ class UrbanGraphDataset(Dataset):
                 fid = len(self.parquet_tables)
                 self.parquet_tables.append(table)
                 for ridx in range(table.num_rows):
+                    if self.skip_single:
+                        buf = table.column("graph")[ridx].as_py()
+                        g = pickle.loads(buf)
+                        if g.number_of_nodes() == 1 and g.number_of_edges() == 0:
+                            continue
                     self.parquet_index.append((fid, ridx))
         else:
             # Stable/numeric-first sorting for arrow files
@@ -331,6 +344,16 @@ class UrbanGraphDataset(Dataset):
                 name = os.path.splitext(os.path.basename(p))[0]
                 return (0, int(name)) if name.isdigit() else (1, name)
             self.arrow_paths.sort(key=sort_key)
+            if self.skip_single:
+                filtered: List[str] = []
+                for p in self.arrow_paths:
+                    with pa.memory_map(p, "rb") as source:
+                        table = ipc.open_file(source).read_all()
+                    g = pickle.loads(table.column("graph")[0].as_py())
+                    if g.number_of_nodes() == 1 and g.number_of_edges() == 0:
+                        continue
+                    filtered.append(p)
+                self.arrow_paths = filtered
 
         super().__init__(self._root_abs, transform, pre_transform)
 
