@@ -11,46 +11,6 @@ except Exception:  # pragma: no cover - library may not be installed in minimal 
     hf_hub_download = None  # type: ignore
 
 
-def _dummy_infer_buildings(block: Polygon, n: int = 5, zone_label: str | None = None) -> List[Polygon]:
-    """Generate simple rectangular buildings inside ``block``.
-
-    The pattern of the rectangles is deterministic and optionally depends on
-    ``zone_label`` so that tests can assert expected behaviour.  The function
-    always returns ``n`` buildings (unless the block is degenerate) to make
-    the output predictable.
-    """
-    minx, miny, maxx, maxy = block.bounds
-    buildings: List[Polygon] = []
-    if minx == maxx or miny == maxy:
-        return buildings
-
-    # Size and vertical offset depend slightly on the zone label in order to
-    # simulate different generation patterns per zone.
-    width = (maxx - minx) / (2 * n)
-    height = (maxy - miny) / 5
-    offset_factor = 0.1
-    if zone_label:
-        zl = str(zone_label).lower()
-        if "industrial" in zl:
-            offset_factor = 0.5
-        elif "commercial" in zl:
-            offset_factor = 0.3
-
-    y0 = miny + (maxy - miny) * offset_factor
-    for i in range(n):
-        x0 = minx + i * 2 * width
-        rect = Polygon(
-            [
-                (x0, y0),
-                (x0 + width, y0),
-                (x0 + width, y0 + height),
-                (x0, y0 + height),
-            ]
-        )
-        buildings.append(rect)
-    return buildings
-
-
 def _to_canonical(poly: Polygon) -> tuple[Polygon, dict[str, Any]]:
     """Rotate, scale and translate ``poly`` to a canonical unit frame.
 
@@ -96,10 +56,10 @@ def infer_from_geojson(
     model_repo: str | None = None,
     model_file: str = "model.pt",
     hf_token: str | None = None,
+    model: Any | None = None,
     verbose: bool = True,
-    use_dummy: bool = True,
 ) -> Dict[str, Any]:
-    """Run model inference for blocks described by GeoJSON.
+    """Run model inference for blocks described by GeoJSON using a trained model.
 
     Parameters
     ----------
@@ -112,14 +72,15 @@ def infer_from_geojson(
     zone_attr:
         Name of the property on each block feature that stores the zone label.
     model_repo:
-        Optional HuggingFace repository id or local directory containing a model.
+        HuggingFace repository id or local directory containing a model. Must
+        be provided when ``model`` is not given.
     model_file:
-        File name within ``model_repo`` to download. Defaults to ``model.pt``.
+        File name within ``model_repo`` to load. Defaults to ``model.pt``.
     hf_token:
         Optional HuggingFace token used when downloading private repositories.
-    use_dummy:
-        When ``True`` the internal simplified generator is used.  Set to
-        ``False`` to load ``model_repo`` and run inference with the real model.
+    model:
+        Pre-instantiated model object with an ``infer`` method.  Intended for
+        tests; if provided ``model_repo`` is ignored.
 
     Returns
     -------
@@ -130,32 +91,28 @@ def infer_from_geojson(
     if not geojson.get("features"):
         raise ValueError("GeoJSON must contain at least one feature")
 
-    model = None
-    model_path = None
-    if model_repo and not use_dummy:
-        model_path = model_repo
-        if not os.path.isdir(model_repo):
+    if model is None:
+        if not model_repo:
+            raise ValueError("model_repo must be provided")
+        model_path: str
+        if os.path.isdir(model_repo):
+            model_path = os.path.join(model_repo, model_file)
+        else:
             if hf_hub_download is None:
                 raise RuntimeError("huggingface_hub not installed")
-            model_file = model_file or "model.pt"
             download_kwargs = {"token": hf_token} if hf_token else {}
             model_path = hf_hub_download(model_repo, model_file, **download_kwargs)
-        try:  # pragma: no cover - torch not required for tests
-            import torch
-            from model import BlockGenerator  # type: ignore
 
-            state = torch.load(model_path, map_location="cpu")
-            state_dict = state.get("model_state_dict", state)
-            opt = state.get("opt", {"device": "cpu", "latent_dim": 64, "n_ft_dim": 64})
-            opt.setdefault("device", "cpu")
-            model = BlockGenerator(opt)
-            model.load_state_dict(state_dict)
-            model.eval()
-        except Exception as exc:  # pragma: no cover - falls back to dummy
-            if verbose:
-                print(f"Warning: failed to load model from {model_path!r}: {exc}. Using dummy generator.")
-            model = None
-            use_dummy = True
+        import torch  # pragma: no cover - torch not required for tests
+        from model import BlockGenerator  # type: ignore
+
+        state = torch.load(model_path, map_location="cpu")  # pragma: no cover - simple load
+        state_dict = state.get("model_state_dict", state)
+        opt = state.get("opt", {"device": "cpu", "latent_dim": 64, "n_ft_dim": 64})
+        opt.setdefault("device", "cpu")
+        model = BlockGenerator(opt)
+        model.load_state_dict(state_dict)
+        model.eval()
 
     total_blocks = len(geojson["features"])
     processed_blocks = 0
@@ -184,18 +141,9 @@ def infer_from_geojson(
         canon_geom, params = _to_canonical(geom)
         if verbose:
             print(" - generating buildings")
-        if use_dummy or model is None:
-            buildings = _dummy_infer_buildings(canon_geom, n, zone_label)
-        else:  # pragma: no cover - real model not used in tests
-            try:
-                if hasattr(model, "infer"):
-                    buildings = model.infer(canon_geom, n=n, zone_label=zone_label)
-                else:
-                    buildings = _dummy_infer_buildings(canon_geom, n, zone_label)
-            except Exception as exc:
-                if verbose:
-                    print(f"Model inference failed: {exc}. Falling back to dummy generator.")
-                buildings = _dummy_infer_buildings(canon_geom, n, zone_label)
+        if not hasattr(model, "infer"):
+            raise RuntimeError("Model does not provide an 'infer' method")
+        buildings = model.infer(canon_geom, n=n, zone_label=zone_label)  # type: ignore[operator]
         if verbose:
             print(f" - generated {len(buildings)} buildings, transforming back and clipping")
 
