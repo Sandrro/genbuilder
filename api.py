@@ -98,7 +98,7 @@ def start_train(req: TrainRequest):
 async def infer_block(
     file: UploadFile = File(...),
     counts: str = Form("{}"),
-    model_repo: str | None = Form(None),
+    model_repo: str = Form(...),
     model_file: str = Form("model.pt"),
     hf_token: str | None = Form(None),
 ):
@@ -124,6 +124,9 @@ async def infer_block(
         counts_data = json.loads(counts) if counts else {}
     except Exception:
         raise HTTPException(status_code=400, detail="invalid counts")
+
+    if not model_repo:
+        raise HTTPException(status_code=400, detail="model_repo is required")
 
     try:
         result = infer_from_geojson(
