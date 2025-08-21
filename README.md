@@ -87,6 +87,18 @@ evaluation.
 Artifacts and logs are written to the host `epoch/`, `logs/` and
 `tensorboard/` directories thanks to volume mounts.
 
+## Inference Docker Image
+
+For running inference without the API server, build the dedicated image:
+
+```bash
+docker build -f Dockerfile.inference -t genbuilder-inference .
+```
+
+The image installs all system libraries required to compile
+`scikit-geometry`, enabling geometry-aware inference pipelines.
+
+
 
 ## Dataset
 Use the `data_to_hf.py` script to upload processed graphs to a HuggingFace dataset repository:
