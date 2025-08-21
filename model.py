@@ -1,9 +1,15 @@
+import os
+import json
+from typing import List
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric
+from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch.nn.parameter import UninitializedParameter
+from shapely.geometry import Polygon
 
 
 class NaiveMsgPass(MessagePassing):
@@ -227,6 +233,109 @@ class BlockGenerator(nn.Module):
         pos = torch.cat((px, py), 1)
         size = torch.cat((sx, sy), 1)
         return exist, pos, size, mu, log_var, bshape, biou
+
+    # --------------------------------------------------------------
+    def infer(self, block: Polygon, n: int = 5, zone_label: str | None = None) -> List[Polygon]:
+        """Generate ``n`` building polygons inside ``block`` in canonical frame.
+
+        Parameters
+        ----------
+        block:
+            Canonical block polygon (already rotated/scaled/centred).
+        n:
+            Number of buildings to attempt to generate.
+        zone_label:
+            Optional zoning label used for conditioning when a zone mapping is
+            available.
+        """
+
+        from transform import block_long_side  # avoid heavy import at module load
+
+        long_side = float(block_long_side(block))
+
+        # --- build minimal input graph ---
+        node_cnt = int(max(0, n))
+        x = torch.zeros((node_cnt, 2), dtype=torch.float32, device=self.device)
+        node_pos = torch.zeros((node_cnt, 2), dtype=torch.float32, device=self.device)
+        node_size = torch.zeros((node_cnt, 2), dtype=torch.float32, device=self.device)
+        b_shape = torch.zeros((node_cnt, 6), dtype=torch.float32, device=self.device)
+        b_iou = torch.zeros((node_cnt, 1), dtype=torch.float32, device=self.device)
+
+        # simple chain edges (bidirectional)
+        edges: list[list[int]] = []
+        for i in range(node_cnt - 1):
+            edges.append([i, i + 1])
+            edges.append([i + 1, i])
+        if edges:
+            edge_index = torch.tensor(edges, dtype=torch.long, device=self.device).t().contiguous()
+        else:
+            edge_index = torch.empty((2, 0), dtype=torch.long, device=self.device)
+
+        data = Data(
+            x=x,
+            edge_index=edge_index,
+            node_pos=node_pos,
+            org_node_pos=node_pos.clone(),
+            node_size=node_size,
+            org_node_size=node_size.clone(),
+            b_shape=b_shape,
+            b_iou=b_iou,
+        )
+        data.batch = torch.zeros(node_cnt, dtype=torch.long, device=self.device)
+
+        # --- zoning conditioning ---
+        cond = None
+        cond_dim = 0
+        try:
+            cond_dim = int(self.cond_proj[0].weight.shape[1])
+        except Exception:
+            cond_dim = 0
+
+        if cond_dim > 0:
+            cond = torch.zeros((1, cond_dim), dtype=torch.float32, device=self.device)
+            if zone_label is not None:
+                if not hasattr(self, "_zone_map_loaded"):
+                    self._zone_map_loaded = True
+                    self._zone_map: dict[str, int] = {}
+                    for p in ("_zones_map.json", "processed/_zones_map.json"):
+                        if os.path.isfile(p):
+                            try:
+                                with open(p, "r", encoding="utf-8") as fh:
+                                    raw = json.load(fh)
+                                mapping = raw.get("map", raw)
+                                self._zone_map = {str(k): int(v) for k, v in mapping.items()}
+                            except Exception:
+                                self._zone_map = {}
+                            break
+                zid = self._zone_map.get(str(zone_label)) if hasattr(self, "_zone_map") else None
+                if zid is not None and 0 <= int(zid) < cond_dim:
+                    cond[0, int(zid)] = 1.0
+
+        # --- run model ---
+        self.eval()
+        with torch.no_grad():
+            exist, pos, size, _, _, _, _ = self.forward(data, cond=cond)
+
+        exist_prob = torch.sigmoid(exist).view(-1).cpu().numpy()
+        pos_np = pos.cpu().numpy() * long_side
+        size_np = size.cpu().numpy() * long_side
+
+        polygons: List[Polygon] = []
+        for i in range(node_cnt):
+            if exist_prob[i] <= 0.5:
+                continue
+            cx, cy = pos_np[i]
+            w, h = size_np[i]
+            poly = Polygon(
+                [
+                    (cx - w / 2.0, cy - h / 2.0),
+                    (cx + w / 2.0, cy - h / 2.0),
+                    (cx + w / 2.0, cy + h / 2.0),
+                    (cx - w / 2.0, cy + h / 2.0),
+                ]
+            )
+            polygons.append(poly)
+        return polygons
 
 
 class AttentionBlockGenerator(BlockGenerator):
