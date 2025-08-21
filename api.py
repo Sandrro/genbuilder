@@ -95,11 +95,18 @@ def start_train(req: TrainRequest):
 
 
 @app.post("/infer")
-async def infer_block(file: UploadFile = File(...), counts: str = Form("{}")):
+async def infer_block(
+    file: UploadFile = File(...),
+    counts: str = Form("{}"),
+    model_repo: str | None = Form(None),
+    model_file: str = Form("model.pt"),
+):
     """Generate building footprints for a block polygon.
 
     ``counts`` may be a JSON object mapping block identifiers to numbers of
-    buildings or a single integer applied to every block.
+    buildings or a single integer applied to every block. ``model_repo`` and
+    ``model_file`` optionally point to a model stored on the HuggingFace Hub
+    (or a local directory/file).
 
     The uploaded file must contain a GeoJSON FeatureCollection with the block
     polygon. The response is a GeoJSON file with generated building polygons in
@@ -117,7 +124,9 @@ async def infer_block(file: UploadFile = File(...), counts: str = Form("{}")):
         raise HTTPException(status_code=400, detail="invalid counts")
 
     try:
-        result = infer_from_geojson(geojson, block_counts=counts_data)
+        result = infer_from_geojson(
+            geojson, block_counts=counts_data, model_repo=model_repo, model_file=model_file
+        )
     except Exception as e:  # pragma: no cover - safe guard
         raise HTTPException(status_code=400, detail=str(e))
 
