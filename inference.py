@@ -4,6 +4,9 @@ import math
 
 from shapely.geometry import shape, mapping, Polygon
 from shapely import affinity
+import numpy as np
+import networkx as nx
+from PIL import Image, ImageDraw
 
 try:  # optional dependency used only when a remote model path is provided
     from huggingface_hub import hf_hub_download, list_repo_files
@@ -77,6 +80,92 @@ def _from_canonical(poly: Polygon, params: dict[str, Any]) -> Polygon:
     return affinity.rotate(unscaled, params["angle"], origin=origin)
 
 
+def _block_long_side(block: Polygon) -> float:
+    """Return the length of the longer side of ``block``'s minimum rectangle."""
+
+    mrr = block.minimum_rotated_rectangle
+    coords = list(mrr.exterior.coords)
+    a0, a1, a2, a3 = coords[0], coords[1], coords[2], coords[3]
+    e1 = math.hypot(a1[0] - a0[0], a1[1] - a0[1])
+    e2 = math.hypot(a2[0] - a1[0], a2[1] - a1[1])
+    return max(e1, e2)
+
+
+def _rasterize_block_mask(block: Polygon, out_size: int = 64) -> np.ndarray:
+    """Rasterize ``block`` polygon to a binary mask of size ``out_size``."""
+
+    minx, miny, maxx, maxy = block.bounds
+    w = maxx - minx
+    h = maxy - miny
+    if w <= 0 or h <= 0:
+        return np.zeros((out_size, out_size), dtype=np.uint8)
+    sx = (out_size - 2) / w
+    sy = (out_size - 2) / h
+    s = min(sx, sy)
+    ox = 1 - minx * s
+    oy = 1 - miny * s
+    pts = [(p[0] * s + ox, p[1] * s + oy) for p in np.asarray(block.exterior.coords)]
+    img = Image.new("L", (out_size, out_size), 0)
+    draw = ImageDraw.Draw(img)
+    draw.polygon(pts, fill=255)
+    return np.array(img, dtype=np.uint8)
+
+
+def _build_graph_original(
+    block: Polygon,
+    pos: np.ndarray,
+    size: np.ndarray,
+    aspect_ratio: float,
+    k_nn: int = 4,
+    mask_size: int = 64,
+    logger: Any | None = None,
+) -> nx.Graph:
+    """Reimplementation of ``transform.build_graph_original`` without skgeom."""
+
+    n = pos.shape[0]
+    G = nx.Graph()
+    for i in range(n):
+        G.add_node(i)
+        G.nodes[i]["posx"] = float(pos[i, 0])
+        G.nodes[i]["posy"] = float(pos[i, 1])
+        G.nodes[i]["size_x"] = float(size[i, 0])
+        G.nodes[i]["size_y"] = float(size[i, 1])
+        G.nodes[i]["exist"] = int(1)
+        G.nodes[i]["merge"] = int(0)
+        G.nodes[i]["shape"] = int(0)
+        G.nodes[i]["iou"] = float(0.0)
+
+    if n >= 2 and k_nn > 0:
+        dist = pos[:, None, :] - pos[None, :, :]
+        dist = np.sum(dist * dist, axis=2)
+        np.fill_diagonal(dist, np.inf)
+        indices = np.argsort(dist, axis=1)[:, : min(k_nn, n - 1)]
+        edge_count = 0
+        for i in range(n):
+            for j in indices[i]:
+                if i < j:
+                    G.add_edge(i, int(j))
+                    edge_count += 1
+        if logger:
+            logger.debug("  • kNN edges added: %d (k=%d)", edge_count, k_nn)
+
+    ls = _block_long_side(block)
+    G.graph["aspect_ratio"] = float(aspect_ratio)
+    G.graph["long_side"] = float(ls)
+    G.graph["binary_mask"] = _rasterize_block_mask(block, out_size=mask_size)
+    G.graph["block_scale"] = float(ls)
+
+    if logger:
+        logger.debug(
+            "  • Graph stats: nodes=%d, edges=%d, mask=%s",
+            G.number_of_nodes(),
+            G.number_of_edges(),
+            tuple(G.graph["binary_mask"].shape),
+        )
+
+    return G
+
+
 def _infer_opt_from_state(state_dict: Dict[str, Any]) -> Dict[str, int]:
     """Derive model hyperparameters from a checkpoint ``state_dict``.
 
@@ -104,232 +193,6 @@ def _infer_opt_from_state(state_dict: Dict[str, Any]) -> Dict[str, int]:
         return {}
 
     return {"n_ft_dim": latent_ch, "latent_dim": latent_dim, "N": N}
-
-
-# ------------------------
-# Checkpoint introspection & model loading (mirrors test.py)
-# ------------------------
-
-def _infer_model_variant_from_ckpt(state_dict) -> str:
-    """Infer which model class the checkpoint corresponds to."""
-    ks = set(state_dict.keys())
-    if any(k.startswith("cnn_encoder.") for k in ks) or "linear1.weight" in ks:
-        return "attn_ind_cnn"
-    if "enc_block_scale.weight" in ks or "enc_block_scale.bias" in ks:
-        return "attn_ind"
-    if any(k.startswith("e_conv1") for k in ks) and any(k.startswith("d_conv1") for k in ks):
-        return "attn"
-    if "aggregate.weight" in ks and "d_exist_1.weight" in ks:
-        return "block"
-    return "naive"
-
-
-def _ckpt_dec_in_features(state_dict, latent_ch: int, heads: int) -> int | None:
-    """Try to read the expected decoder input width from checkpoint linear layers."""
-    import torch
-    Tensor = getattr(torch, "Tensor", None)
-    candidates = [
-        "d_exist_0.weight",
-        "d_posx_0.weight",
-        "d_posy_0.weight",
-        "d_sizex_0.weight",
-        "d_sizey_0.weight",
-        "d_shape_0.weight",
-        "d_iou_0.weight",
-    ]
-    for k in candidates:
-        W = state_dict.get(k, None)
-        if Tensor is not None and isinstance(W, Tensor) and W.dim() == 2:
-            return int(W.shape[1])
-    return None
-
-
-def _infer_concat_heads_from_ckpt(state_dict, latent_ch: int, heads: int, T: int) -> bool:
-    """Return True if checkpoint uses concatenation of attention heads."""
-    import torch
-    Tensor = getattr(torch, "Tensor", None)
-    target = latent_ch * max(1, heads)
-    for k in (
-        "e_conv1.bias",
-        "e_conv2.bias",
-        "e_conv3.bias",
-        "d_conv1.bias",
-        "d_conv2.bias",
-        "d_conv3.bias",
-    ):
-        b = state_dict.get(k, None)
-        if Tensor is not None and isinstance(b, Tensor) and b.numel() == target and heads > 1:
-            return True
-    W = state_dict.get("aggregate.weight", None)
-    if Tensor is not None and isinstance(W, Tensor):
-        in_features = W.shape[1]
-        coef = in_features // max(1, latent_ch)
-        if coef >= (2 + heads):
-            return True
-    dec_in = _ckpt_dec_in_features(state_dict, latent_ch, heads)
-    if dec_in is not None and dec_in == latent_ch * heads:
-        return True
-    return False
-
-
-def _build_model(opt, variant: str, N: int, concat_heads: bool):
-    import importlib
-
-    model_mod = importlib.import_module("model")
-    BlockGenerator = getattr(model_mod, "BlockGenerator")
-    AttentionBlockGenerator = getattr(model_mod, "AttentionBlockGenerator", BlockGenerator)
-    AttentionBlockGenerator_independent = getattr(
-        model_mod, "AttentionBlockGenerator_independent", BlockGenerator
-    )
-    AttentionBlockGenerator_independent_cnn = getattr(
-        model_mod, "AttentionBlockGenerator_independent_cnn", BlockGenerator
-    )
-    NaiveBlockGenerator = getattr(model_mod, "NaiveBlockGenerator", BlockGenerator)
-
-    opt = dict(opt)
-    opt["concat_heads"] = bool(concat_heads)
-    if variant == "attn_ind_cnn":
-        return AttentionBlockGenerator_independent_cnn(opt, N=N)
-    if variant == "attn_ind":
-        return AttentionBlockGenerator_independent(opt, N=N)
-    if variant == "attn":
-        return AttentionBlockGenerator(opt, N=N)
-    if variant == "block":
-        return BlockGenerator(opt, N=N)
-    if variant == "naive":
-        return NaiveBlockGenerator(opt, N=N)
-    # fallback by opt
-    if opt.get("is_blockplanner", False):
-        return NaiveBlockGenerator(opt, N=N)
-    if opt.get("is_conditional_block", False):
-        if opt.get("convlayer") in opt.get("attten_net", []):
-            return AttentionBlockGenerator(opt, N=N)
-        return BlockGenerator(opt, N=N)
-    if opt.get("convlayer") in opt.get("attten_net", []):
-        if opt.get("encode_cnn", False):
-            return AttentionBlockGenerator_independent_cnn(opt, N=N)
-        return AttentionBlockGenerator_independent(opt, N=N)
-    return BlockGenerator(opt, N=N)
-
-
-def _filter_state_for_model(state_dict, model):
-    import torch
-    Tensor = getattr(torch, "Tensor", None)
-    model_sd = getattr(model, "state_dict", lambda: {})()
-    keep = {}
-    for k, v in state_dict.items():
-        if (
-            k in model_sd
-            and Tensor is not None
-            and isinstance(v, Tensor)
-            and v.shape == model_sd[k].shape
-        ):
-            keep[k] = v
-    return keep
-
-
-def _try_load_variants(opt, N, device, state_dict, inferred_variant: str, latent_ch: int, heads: int):
-    concat_guess = _infer_concat_heads_from_ckpt(state_dict, latent_ch, heads, int(opt.get("T", 3)))
-    variants = [inferred_variant]
-    if inferred_variant == "attn_ind_cnn":
-        variants += ["attn_ind", "attn"]
-    elif inferred_variant == "attn_ind":
-        variants += ["attn", "attn_ind_cnn"]
-    elif inferred_variant == "attn":
-        variants += ["attn_ind", "attn_ind_cnn"]
-
-    best = None
-    best_loaded = -1
-    for var in variants:
-        for concat in [concat_guess, not concat_guess]:
-            model = _build_model(opt, var, N, concat)
-            filtered = _filter_state_for_model(state_dict, model)
-            model_sd = getattr(model, "state_dict", lambda: {})()
-            missing = len(model_sd) - len(filtered)
-            if hasattr(model, "load_state_dict"):
-                try:
-                    model.load_state_dict(filtered, strict=False)
-                except TypeError:
-                    model.load_state_dict(filtered)
-            loaded = len(filtered)
-            if loaded > best_loaded:
-                best = model
-                best_loaded = loaded
-
-    if best is None:
-        raise RuntimeError("Cannot load checkpoint into any tested architecture")
-    if hasattr(best, "to"):
-        best.to(device)
-    return best
-
-
-def _generate_with_decode(model, block: Polygon, n: int, zone_label: str | None = None):
-    """Generate buildings using the model's decode path (mirrors test.py)."""
-    from torch_geometric.data import Data  # local import to avoid heavy dependency if unused
-    from model import block_long_side
-    import torch
-
-    device = next(model.parameters()).device if hasattr(model, "parameters") else torch.device("cpu")
-    node_cnt = max(0, int(n))
-    x = torch.zeros((node_cnt, 2), dtype=torch.float32, device=device)
-    node_pos = torch.zeros((node_cnt, 2), dtype=torch.float32, device=device)
-    node_size = torch.zeros((node_cnt, 2), dtype=torch.float32, device=device)
-    b_shape = torch.zeros((node_cnt, 6), dtype=torch.float32, device=device)
-    b_iou = torch.zeros((node_cnt, 1), dtype=torch.float32, device=device)
-    edges = []
-    for i in range(node_cnt - 1):
-        edges.append([i, i + 1])
-        edges.append([i + 1, i])
-    if edges:
-        edge_index = torch.tensor(edges, dtype=torch.long, device=device).t().contiguous()
-    else:
-        edge_index = torch.empty((2, 0), dtype=torch.long, device=device)
-
-    data = Data(
-        x=x,
-        edge_index=edge_index,
-        node_pos=node_pos,
-        org_node_pos=node_pos.clone(),
-        node_size=node_size,
-        org_node_size=node_size.clone(),
-        b_shape=b_shape,
-        b_iou=b_iou,
-    )
-    data.batch = torch.zeros(node_cnt, dtype=torch.long, device=device)
-
-    z = torch.randn(1, int(getattr(model, "latent_dim", 64)), device=device)
-    try:
-        exist, posx, posy, sizex, sizey, _, _ = model.decode(z, edge_index, node_cnt)
-    except TypeError:
-        # expect decode(z, block_condition, edge_index, node_cnt)
-        bc_dim = int(getattr(model, "blockshape_latent_dim", 20) + 20)
-        block_condition = torch.zeros((1, bc_dim), dtype=torch.float32, device=device)
-        exist, posx, posy, sizex, sizey, _, _ = model.decode(
-            z, block_condition, edge_index, node_cnt
-        )
-
-    pos = torch.cat((posx, posy), 1)
-    size = torch.cat((sizex, sizey), 1)
-    long_side = float(block_long_side(block))
-    exist_prob = torch.sigmoid(exist).view(-1).cpu().numpy()
-    pos_np = pos.cpu().numpy() * long_side
-    size_np = size.cpu().numpy() * long_side
-    polygons: List[Polygon] = []
-    for i in range(node_cnt):
-        if exist_prob[i] <= 0.5:
-            continue
-        cx, cy = pos_np[i]
-        w, h = size_np[i]
-        poly = Polygon(
-            [
-                (cx - w / 2.0, cy - h / 2.0),
-                (cx + w / 2.0, cy - h / 2.0),
-                (cx + w / 2.0, cy + h / 2.0),
-                (cx - w / 2.0, cy + h / 2.0),
-            ]
-        )
-        polygons.append(poly)
-    return polygons
 
 
 def infer_from_geojson(
@@ -423,7 +286,6 @@ def infer_from_geojson(
         import torch  # pragma: no cover - torch not required for tests
         from model import BlockGenerator  # type: ignore
 
-        import torch
         state = torch.load(model_path, map_location="cpu")  # pragma: no cover - simple load
         state_dict = state.get("model_state_dict", state)
         ckpt_opt = state.get("opt")
@@ -436,13 +298,13 @@ def infer_from_geojson(
         opt.setdefault("n_ft_dim", inferred.get("n_ft_dim", 64))
         opt.setdefault("latent_dim", inferred.get("latent_dim", 64))
         N = opt.pop("N", inferred.get("N", 80))
-        device = opt.get("device", "cpu")
-        opt["device"] = device
+        opt.setdefault("device", "cpu")
 
-        latent_ch = int(opt.get("n_ft_dim", 64))
-        heads = int(opt.get("head_num", 1))
-        inferred_variant = _infer_model_variant_from_ckpt(state_dict)
-        model = _try_load_variants(opt, N, device, state_dict, inferred_variant, latent_ch, heads)
+        model = BlockGenerator(opt, N)
+        model.load_state_dict(state_dict)
+        # ensure model parameters reside on the configured device
+        if hasattr(model, "to"):
+            model.to(opt["device"])
         model.eval()
 
     total_blocks = len(geojson["features"])
@@ -461,6 +323,12 @@ def infer_from_geojson(
 
     for feat in geojson["features"]:
         geom = shape(feat["geometry"])
+        # shrink block by 5m to keep a buffer from the edges
+        buffered = geom.buffer(-5)
+        if not buffered.is_empty and buffered.area > 0:
+            geom = buffered
+        elif verbose:
+            print(" - buffer too large, using original geometry")
         props = feat.get("properties", {})
         block_id = str(props.get("id") or feat.get("id") or "")
         zone_label = props.get(zone_attr)
@@ -472,22 +340,48 @@ def infer_from_geojson(
         canon_geom, params = _to_canonical(geom)
         if verbose:
             print(" - generating buildings")
-        if hasattr(model, "infer"):
-            buildings = model.infer(canon_geom, n=n, zone_label=zone_label)  # type: ignore[operator]
-        else:
-            buildings = _generate_with_decode(model, canon_geom, n=n, zone_label=zone_label)
+        if not hasattr(model, "infer"):
+            raise RuntimeError("Model does not provide an 'infer' method")
+        buildings = model.infer(canon_geom, n=n, zone_label=zone_label)  # type: ignore[operator]
         if verbose:
             print(f" - generated {len(buildings)} buildings, transforming back and clipping")
 
+        world_buildings: List[Polygon] = []
         for b in buildings:
             world_b = _from_canonical(b, params)
             clipped = world_b.intersection(geom)
             if clipped.is_empty:
                 continue
+            world_buildings.append(clipped)
             b_props = {zone_attr: zone_label, "block_id": block_id}
             features.append(
                 {"type": "Feature", "properties": b_props, "geometry": mapping(clipped)}
             )
+
+        # best-effort reverse transform using dataset graph utilities
+        if world_buildings:
+            try:
+                pos = np.array(
+                    [[p.centroid.x, p.centroid.y] for p in world_buildings], dtype=float
+                )
+                size = np.array(
+                    [
+                        [p.bounds[2] - p.bounds[0], p.bounds[3] - p.bounds[1]]
+                        for p in world_buildings
+                    ],
+                    dtype=float,
+                )
+                aspect_ratio = (
+                    params.get("scale_y", 1.0) / params.get("scale_x", 1.0)
+                    if params.get("scale_x")
+                    else 1.0
+                )
+                _build_graph_original(
+                    geom, pos, size, aspect_ratio, k_nn=6, mask_size=128
+                )
+            except Exception:
+                if verbose:
+                    print(" - reverse transform failed, continuing")
 
         processed_blocks += 1
         if verbose:
