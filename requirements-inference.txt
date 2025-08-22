@@ -1,7 +1,0 @@
-numpy<2.0
-networkx==3.2.1
-shapely==2.0.4
-pillow==10.3.0
-PyYAML==6.0.1
-huggingface_hub==0.25.2
-skgeom @ git+https://github.com/scikit-geometry/scikit-geometry.git@0.1.2

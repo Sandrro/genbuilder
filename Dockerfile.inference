@@ -1,22 +1,12 @@
-FROM python:3.9-slim
+FROM mambaorg/micromamba:1.5.3
 
 SHELL ["/bin/bash","-lc"]
 WORKDIR /app
 
-COPY requirements-inference.txt requirements-inference.txt
+COPY environment-inference.yml environment.yml
 
-ARG TORCH=2.1.0
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential cmake git libgmp-dev libmpfr-dev libboost-all-dev libeigen3-dev libcgal-dev && \
-    rm -rf /var/lib/apt/lists/* && \
-    python -m pip install --upgrade pip && \
-    pip install --no-cache-dir torch==${TORCH} && \
-    pip install --no-cache-dir \
-      torch-scatter==2.1.2 torch-sparse==0.6.18 torch-geometric==2.5.3 \
-      -f https://data.pyg.org/whl/torch-${TORCH}+cpu.html && \
-    pip install --no-cache-dir -r requirements-inference.txt && \
-    find /usr/local -name '__pycache__' -type d -exec rm -rf {} +
+RUN micromamba install -y -n base -f environment.yml && \
+    micromamba clean -a -y
 
 COPY . .
 EXPOSE 8000
