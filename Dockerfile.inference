@@ -5,9 +5,19 @@ WORKDIR /app
 
 COPY environment-inference.yml environment.yml
 
+# 1) Ставим PyTorch + CUDA и остальное через conda/mamba
 RUN micromamba install -y -n base -f environment.yml && \
+    micromamba clean -a -y
+
+# 2) Ставим PyG-стек (под Torch 2.1.0 + cu121) через pip из официального индекса колёс
+RUN micromamba run -n base pip install \
+      pyg_lib torch-scatter torch-sparse torch-cluster torch-spline-conv \
+      -f https://data.pyg.org/whl/torch-2.1.0+cu121.html && \
+    micromamba run -n base pip install torch_geometric && \
     micromamba clean -a -y
 
 COPY . .
 EXPOSE 8000
-ENTRYPOINT ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# ВАЖНО: запускать внутри конда-окружения
+ENTRYPOINT ["micromamba", "run", "-n", "base", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
