@@ -23,7 +23,9 @@ Then you may install other dependencies like: matplotlib, yaml, pickle, etc.
 For remote experiments the project ships with a `Dockerfile` and
 
 `docker-compose.yml` that expose a FastAPI service wrapping training and
-evaluation.
+evaluation. Inference runs in a dedicated `Dockerfile.inference` image
+based on Python 3.9 so `scikit-geometry` can be built; the compose
+configuration already references this file.
 
 1. **Build the image**
 

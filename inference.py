@@ -16,6 +16,12 @@ except Exception:  # pragma: no cover - library may not be installed in minimal 
 
 import yaml
 
+# geometry library used for mid-axis based warp
+try:
+    import skgeom  # type: ignore
+except Exception:  # pragma: no cover - optional geometry library
+    skgeom = None  # type: ignore
+
 
 def _to_canonical(poly: Polygon) -> tuple[Polygon, dict[str, Any]]:
     """Rotate, scale and translate ``poly`` to a canonical unit frame.
@@ -346,8 +352,43 @@ def infer_from_geojson(
         if verbose:
             print(f" - generated {len(buildings)} buildings, transforming back and clipping")
 
+        transformed_buildings: List[Polygon] = buildings
+        if buildings and skgeom is not None:
+            try:  # pragma: no cover - heavy geometry branch
+                from example_canonical_transform import (
+                    get_polyskeleton_longest_path,
+                    modified_skel_to_medaxis,
+                )
+                from geo_utils import (
+                    inverse_warp_bldg_by_midaxis,
+                    get_block_aspect_ratio,
+                )
+
+                def _shapely_to_skgeom(poly: Polygon):
+                    exterior_polyline = list(poly.exterior.coords)[:-1]
+                    exterior_polyline.reverse()
+                    return skgeom.Polygon(exterior_polyline)
+
+                sk_blk = _shapely_to_skgeom(canon_geom)
+                skel = skgeom.skeleton.create_interior_straight_skeleton(sk_blk)
+                _, longest_skel = get_polyskeleton_longest_path(skel, sk_blk)
+                medaxis = modified_skel_to_medaxis(longest_skel, canon_geom)
+                aspect_rto = get_block_aspect_ratio(canon_geom, medaxis)
+                pos = np.array([[p.centroid.x, p.centroid.y] for p in buildings], dtype=float)
+                size = np.array(
+                    [[p.bounds[2] - p.bounds[0], p.bounds[3] - p.bounds[1]] for p in buildings],
+                    dtype=float,
+                )
+                transformed_buildings, _, _ = inverse_warp_bldg_by_midaxis(
+                    pos, size, medaxis, aspect_rto
+                )
+            except Exception as e:
+                if verbose:
+                    print(f" - full reverse transform failed: {e}")
+                transformed_buildings = buildings
+
         world_buildings: List[Polygon] = []
-        for b in buildings:
+        for b in transformed_buildings:
             world_b = _from_canonical(b, params)
             clipped = world_b.intersection(geom)
             if clipped.is_empty:
