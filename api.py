@@ -98,7 +98,7 @@ def start_train(req: TrainRequest):
 async def infer_block(
     file: UploadFile = File(...),
     counts: str = Form("{}"),
-    model_repo: str = Form(...),
+    model_repo: str | None = Form(None),
     model_file: str | None = Form(None),
     hf_token: str | None = Form(None),
 ):
