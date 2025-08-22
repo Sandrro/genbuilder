@@ -9,7 +9,7 @@ dependencies:
   - cpuonly
   - pytorch-scatter=2.1.2
   - pytorch-sparse=0.6.18
-  - pytorch-geometric=2.5.3
+  - pytorch-geometric=2.5.2
   - numpy<2.0
   - networkx=3.2.1
   - shapely=2.0.4
