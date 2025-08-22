@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Union
 import os
 import math
 
@@ -124,7 +124,7 @@ def _build_graph_original(
     aspect_ratio: float,
     k_nn: int = 4,
     mask_size: int = 64,
-    logger: Any | None = None,
+    logger: Optional[Any] = None,
 ) -> nx.Graph:
     """Reimplementation of ``transform.build_graph_original`` without skgeom."""
 
@@ -203,12 +203,12 @@ def _infer_opt_from_state(state_dict: Dict[str, Any]) -> Dict[str, int]:
 
 def infer_from_geojson(
     geojson: Dict[str, Any],
-    block_counts: Dict[str, int] | int | None = None,
+    block_counts: Optional[Union[Dict[str, int], int]] = None,
     zone_attr: str = "zone",
-    model_repo: str | None = None,
-    model_file: str | None = None,
-    hf_token: str | None = None,
-    model: Any | None = None,
+    model_repo: Optional[str] = None,
+    model_file: Optional[str] = None,
+    hf_token: Optional[str] = None,
+    model: Optional[Any] = None,
     verbose: bool = True,
 ) -> Dict[str, Any]:
     """Run model inference for blocks described by GeoJSON using a trained model.
@@ -248,7 +248,7 @@ def infer_from_geojson(
         if not model_repo:
             raise ValueError("model_repo must be provided")
         model_path: str
-        opt: Dict[str, Any] | None = None
+        opt: Optional[Dict[str, Any]] = None
         if os.path.isdir(model_repo):
             if model_file is None:
                 candidates = [

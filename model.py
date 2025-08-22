@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -250,7 +250,7 @@ class BlockGenerator(nn.Module):
         return exist, pos, size, mu, log_var, bshape, biou
 
     # --------------------------------------------------------------
-    def infer(self, block: Polygon, n: int = 5, zone_label: str | None = None) -> List[Polygon]:
+    def infer(self, block: Polygon, n: int = 5, zone_label: Optional[str] = None) -> List[Polygon]:
         """Generate ``n`` building polygons inside ``block`` in canonical frame.
 
         Parameters
