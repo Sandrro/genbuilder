@@ -1,6 +1,8 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.inference
     image: sandrro/genbuilder_vector:0.4
     gpus: all
 

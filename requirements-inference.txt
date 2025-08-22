@@ -1,0 +1,2 @@
+-r requirements.txt
+scikit-geometry @ git+https://github.com/scikit-geometry/scikit-geometry.git
