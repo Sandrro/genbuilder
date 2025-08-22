@@ -5,7 +5,7 @@ import json
 import tempfile
 
 import shutil
-from typing import List
+from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 
@@ -21,17 +21,17 @@ app = FastAPI()
 class TrainRequest(BaseModel):
     config: str = "train_gnn.yaml"
     dataset: str = "my_dataset"
-    dataset_repo: str | None = None
-    upload_repo: str | None = None
-    hf_token: str | None = None
+    dataset_repo: Optional[str] = None
+    upload_repo: Optional[str] = None
+    hf_token: Optional[str] = None
 
 class TestRequest(BaseModel):
     config: str = "train_gnn.yaml"
     dataset: str = "my_dataset"
-    dataset_repo: str | None = None
-    model_repo: str | None = None
-    epoch: str | None = None
-    hf_token: str | None = None
+    dataset_repo: Optional[str] = None
+    model_repo: Optional[str] = None
+    epoch: Optional[str] = None
+    hf_token: Optional[str] = None
 
 
 @app.post("/data")
@@ -98,9 +98,9 @@ def start_train(req: TrainRequest):
 async def infer_block(
     file: UploadFile = File(...),
     counts: str = Form("{}"),
-    model_repo: str | None = Form(None),
-    model_file: str | None = Form(None),
-    hf_token: str | None = Form(None),
+    model_repo: Optional[str] = Form(None),
+    model_file: Optional[str] = Form(None),
+    hf_token: Optional[str] = Form(None),
 ):
     """Generate building footprints for a block polygon.
 
