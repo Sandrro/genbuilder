@@ -390,9 +390,11 @@ def infer_from_geojson(
         world_buildings: List[Polygon] = []
         for b in transformed_buildings:
             world_b = _from_canonical(b, params)
-            clipped = world_b.intersection(geom)
-            if clipped.is_empty:
-                continue
+            clipped = world_b
+            if world_b.difference(geom).area > 1e-9:
+                clipped = world_b.intersection(geom)
+                if clipped.is_empty:
+                    continue
             world_buildings.append(clipped)
             b_props = {zone_attr: zone_label, "block_id": block_id}
             features.append(

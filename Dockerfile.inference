@@ -3,7 +3,6 @@ FROM python:3.9-slim
 SHELL ["/bin/bash","-lc"]
 WORKDIR /app
 
-COPY requirements.txt requirements.txt
 COPY requirements-inference.txt requirements-inference.txt
 
 ARG TORCH=2.1.0
