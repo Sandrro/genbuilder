@@ -1,22 +1,6 @@
-# GlobalMapper: Arbitrary-Shaped Urban Layout Generation
-Official Pytorch Implementation of "GlobalMapper: Arbitrary-Shaped Urban Layout Generation"
+# Genbuilder
+Based on https://arking1995.github.io/GlobalMapper/
 
-[arXiv](https://arxiv.org/abs/2307.09693) | [BibTeX](#bibtex) | [Project Page](https://arking1995.github.io/GlobalMapper/)
-
-This repo contains codes for single GPU training for 
-[GlobalMapper: Arbitrary-Shaped Urban Layout Generation](https://arxiv.org/pdf/2307.09693.pdf)
-
-**Note that this repo is lack of code comments.**
-
-## Environment
-We provide required environments in "environment.yml". But practially we suggest to use below commands for crucial dependencies:
-```
-pip install torch==1.9.0+cu111 torchvision==0.10.0+cu111 torchaudio==0.9.0 -f https://download.pytorch.org/whl/torch_stable.html
-pip install torch-sparse -f https://data.pyg.org/whl/torch-1.9.0+cu111.html
-pip install torch-scatter -f https://data.pyg.org/whl/torch-1.9.0+cu111.html
-pip install torch-geometric
-```
-Then you may install other dependencies like: matplotlib, yaml, pickle, etc.
 
 ## Docker & Docker Compose
 
@@ -121,23 +105,4 @@ python test.py
 
 ## How to do canonical spatial transformation
 We provide a simple example in "example_canonical_transform.py". Details are provieded in our Supplemental [Supp](https://openaccess.thecvf.com/content/ICCV2023/supplemental/He_GlobalMapper_Arbitrary-Shaped_Urban_ICCV_2023_supplemental.pdf). We encourage users to commit their own realization.
-
-
-## How to do visualization
-All maps in the paper are visualized by simple matplotlib draw functions that you may compose in minutes.
-
-
-## BibTeX
-
-If you use this code, please cite
-```text
-@InProceedings{He_2023_ICCV,
-    author    = {He, Liu and Aliaga, Daniel},
-    title     = {GlobalMapper: Arbitrary-Shaped Urban Layout Generation},
-    booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
-    month     = {October},
-    year      = {2023},
-    pages     = {454-464}
-}
-```
 
