@@ -1,8 +1,8 @@
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Iterable, Tuple
 import os
 import math
 
-from shapely.geometry import shape, mapping, Polygon
+from shapely.geometry import shape, mapping, Polygon, MultiPolygon, base
 from shapely import affinity
 import numpy as np
 import networkx as nx
@@ -22,6 +22,23 @@ try:
 except Exception:  # pragma: no cover - optional geometry library
     skgeom = None  # type: ignore
 
+# make_valid (shapely>=2) — с fallback на buffer(0)
+try:  # pragma: no cover
+    from shapely.validation import make_valid as _shp_make_valid
+
+    def _make_valid(g: base.BaseGeometry) -> base.BaseGeometry:
+        return _shp_make_valid(g)
+except Exception:  # pragma: no cover
+    def _make_valid(g: base.BaseGeometry) -> base.BaseGeometry:
+        try:
+            return g.buffer(0)
+        except Exception:
+            return g
+
+
+# =========================
+# Canonical <-> World space
+# =========================
 
 def _to_canonical(poly: Polygon) -> tuple[Polygon, dict[str, Any]]:
     """Rotate, scale and translate ``poly`` to a canonical unit frame.
@@ -55,8 +72,8 @@ def _to_canonical(poly: Polygon) -> tuple[Polygon, dict[str, Any]]:
     rotated = affinity.rotate(poly, -angle, origin=centroid)
     scaled = affinity.scale(
         rotated,
-        xfact=1 / long_side,
-        yfact=1 / short_side,
+        xfact=1 / max(long_side, 1e-9),
+        yfact=1 / max(short_side, 1e-9),
         origin=centroid,
     )
     shifted_centroid = scaled.centroid
@@ -117,6 +134,10 @@ def _rasterize_block_mask(block: Polygon, out_size: int = 64) -> np.ndarray:
     return np.array(img, dtype=np.uint8)
 
 
+# ==================
+# Graph construction
+# ==================
+
 def _build_graph_original(
     block: Polygon,
     pos: np.ndarray,
@@ -172,22 +193,120 @@ def _build_graph_original(
     return G
 
 
-def _infer_opt_from_state(state_dict: Dict[str, Any]) -> Dict[str, int]:
-    """Derive model hyperparameters from a checkpoint ``state_dict``.
+# ======================
+# Utility / Postprocess
+# ======================
 
-    Parameters
-    ----------
-    state_dict:
-        State dictionary containing at least ``ft_init.weight`` and
-        ``d_ft_init.weight`` tensors.
+def _flatten_polys(geom: base.BaseGeometry) -> Iterable[Polygon]:
+    if geom.is_empty:
+        return []
+    if isinstance(geom, Polygon):
+        return [geom]
+    if isinstance(geom, MultiPolygon):
+        return list(geom.geoms)
+    # любой другой — пытаемся привести к полигонам
+    try:
+        return [g for g in geom.geoms if isinstance(g, Polygon)]  # type: ignore[attr-defined]
+    except Exception:
+        return []
 
-    Returns
-    -------
-    dict
-        Mapping with inferred ``n_ft_dim`` (latent channels), ``latent_dim``
-        and ``N`` (max number of nodes). Missing keys result in an empty
-        dictionary.
+
+def _polygon_area(geom: base.BaseGeometry) -> float:
+    try:
+        return float(geom.area)
+    except Exception:
+        return 0.0
+
+
+def _iou(a: Polygon, b: Polygon) -> float:
+    inter = a.intersection(b)
+    if inter.is_empty:
+        return 0.0
+    u = a.union(b)
+    ia = _polygon_area(inter)
+    ua = _polygon_area(u)
+    return (ia / ua) if ua > 0 else 0.0
+
+
+def _nms(polys: List[Polygon], iou_thr: float) -> List[Polygon]:
+    kept: List[Polygon] = []
+    for p in polys:
+        drop = False
+        for q in kept:
+            if _iou(p, q) >= iou_thr:
+                drop = True
+                break
+        if not drop:
+            kept.append(p)
+    return kept
+
+
+def _safe_clip_to_block(poly: Polygon, block: Polygon) -> List[Polygon]:
+    clipped = poly.intersection(block)
+    if clipped.is_empty:
+        return []
+    return [g for g in _flatten_polys(_make_valid(clipped)) if _polygon_area(g) > 0]
+
+
+# ==============================
+# Mid-axis inverse warp (optional)
+# ==============================
+
+def _try_midaxis_inverse(
+    canon_block: Polygon,
+    canon_buildings: List[Polygon],
+    verbose: bool = False,
+) -> Optional[List[Polygon]]:
+    """Attempt to inverse-warp buildings along block medial axis using skgeom.
+
+    Returns a new list of polygons on success; None on failure or if skgeom is missing.
     """
+    if skgeom is None:
+        return None
+    try:  # pragma: no cover - heavy geometry branch
+        from example_canonical_transform import (
+            get_polyskeleton_longest_path,
+            modified_skel_to_medaxis,
+        )
+        from geo_utils import (
+            inverse_warp_bldg_by_midaxis,
+            get_block_aspect_ratio,
+        )
+
+        def _shapely_to_skgeom(poly: Polygon):
+            exterior_polyline = list(poly.exterior.coords)[:-1]
+            exterior_polyline.reverse()
+            return skgeom.Polygon(exterior_polyline)
+
+        sk_blk = _shapely_to_skgeom(canon_block)
+        skel = skgeom.skeleton.create_interior_straight_skeleton(sk_blk)
+        _, longest_skel = get_polyskeleton_longest_path(skel, sk_blk)
+        medaxis = modified_skel_to_medaxis(longest_skel, canon_block)
+        aspect_rto = get_block_aspect_ratio(canon_block, medaxis)
+        pos = np.array([[p.centroid.x, p.centroid.y] for p in canon_buildings], dtype=float)
+        size = np.array(
+            [[p.bounds[2] - p.bounds[0], p.bounds[3] - p.bounds[1]] for p in canon_buildings],
+            dtype=float,
+        )
+        warped_buildings, _, _ = inverse_warp_bldg_by_midaxis(pos, size, medaxis, aspect_rto)
+        # функция возвращает список shapely-полигонов
+        out_polys = [
+            _make_valid(g) for g in warped_buildings if isinstance(g, (Polygon, MultiPolygon))
+        ]
+        out_flat: List[Polygon] = [gg for g in out_polys for gg in _flatten_polys(g)]
+        return out_flat
+    except Exception as e:
+        if verbose:
+            print(f" - mid-axis inverse warp failed: {e}")
+        return None
+
+
+# ==============
+# Main inference
+# ==============
+
+def _infer_opt_from_state(state_dict: Dict[str, Any]) -> Dict[str, int]:
+    """Derive model hyperparameters from a checkpoint ``state_dict``."""
 
     try:
         ft_shape = state_dict["ft_init.weight"].shape
@@ -201,6 +320,21 @@ def _infer_opt_from_state(state_dict: Dict[str, Any]) -> Dict[str, int]:
     return {"n_ft_dim": latent_ch, "latent_dim": latent_dim, "N": N}
 
 
+def _normalize_model_output(
+    raw: Union[List[Polygon], Tuple[List[Polygon], Any], Any]
+) -> List[Polygon]:
+    """Accept a few common return shapes from model.infer and normalize to List[Polygon]."""
+    if isinstance(raw, tuple) and len(raw) >= 1 and isinstance(raw[0], list):
+        raw = raw[0]
+    if isinstance(raw, list) and all(isinstance(p, (Polygon, MultiPolygon)) for p in raw):
+        flat: List[Polygon] = []
+        for g in raw:  # type: ignore[assignment]
+            flat.extend(_flatten_polys(_make_valid(g)))
+        return flat
+    # last resort — nothing usable
+    return []
+
+
 def infer_from_geojson(
     geojson: Dict[str, Any],
     block_counts: Optional[Union[Dict[str, int], int]] = None,
@@ -210,35 +344,29 @@ def infer_from_geojson(
     hf_token: Optional[str] = None,
     model: Optional[Any] = None,
     verbose: bool = True,
+    # new knobs
+    buffer_margin: float = 5.0,
+    min_area: float = 1.0,  # m^2
+    dedupe_iou: float = 0.6,
+    k_nn: int = 6,
+    mask_size: int = 128,
 ) -> Dict[str, Any]:
     """Run model inference for blocks described by GeoJSON using a trained model.
 
     Parameters
     ----------
     geojson:
-        A GeoJSON FeatureCollection with Polygon features representing blocks.
+        FeatureCollection with Polygon features representing blocks.
     block_counts:
-        Either a mapping from block identifiers to the number of buildings to
-        generate for each block or a single integer applied to every block. If
-        omitted, 5 buildings per block are generated.
+        Dict block_id -> n_buildings, или просто int для всех блоков.
     zone_attr:
-        Name of the property on each block feature that stores the zone label.
-    model_repo:
-        HuggingFace repository id or local directory containing a model. Must
-        be provided when ``model`` is not given.
-    model_file:
-        Optional file name within ``model_repo`` to load. If omitted the first
-        file with extension ``.pt`` or ``.pth`` is used.
-    hf_token:
-        Optional HuggingFace token used when downloading private repositories.
-    model:
-        Pre-instantiated model object with an ``infer`` method.  Intended for
-        tests; if provided ``model_repo`` is ignored.
+        Имя свойства с зоной.
+    model_repo / model_file / hf_token / model:
+        Загрузка или передача готовой модели. Модель должна иметь метод ``infer``.
 
     Returns
     -------
-    dict
-        GeoJSON FeatureCollection with generated building footprints.
+    FeatureCollection с контурами зданий в координатах исходных блоков.
     """
 
     if not geojson.get("features"):
@@ -251,9 +379,7 @@ def infer_from_geojson(
         opt: Optional[Dict[str, Any]] = None
         if os.path.isdir(model_repo):
             if model_file is None:
-                candidates = [
-                    f for f in os.listdir(model_repo) if f.endswith((".pt", ".pth"))
-                ]
+                candidates = [f for f in os.listdir(model_repo) if f.endswith((".pt", ".pth"))]
                 if not candidates:
                     raise FileNotFoundError("no model weights found in directory")
                 model_file = sorted(candidates)[0]
@@ -328,13 +454,16 @@ def infer_from_geojson(
         count_map = block_counts
 
     for feat in geojson["features"]:
-        geom = shape(feat["geometry"])
-        # shrink block by 5m to keep a buffer from the edges
-        buffered = geom.buffer(-5)
-        if not buffered.is_empty and buffered.area > 0:
-            geom = buffered
-        elif verbose:
-            print(" - buffer too large, using original geometry")
+        geom = shape(feat["geometry"])  # исходный блок
+        geom = _make_valid(geom)
+        # shrink block by buffer_margin to keep a buffer from the edges
+        if buffer_margin > 0:
+            buffered = geom.buffer(-buffer_margin)
+            if not buffered.is_empty and buffered.area > 0:
+                geom = _make_valid(buffered)
+            elif verbose:
+                print(" - buffer too large, using original geometry")
+
         props = feat.get("properties", {})
         block_id = str(props.get("id") or feat.get("id") or "")
         zone_label = props.get(zone_attr)
@@ -344,87 +473,65 @@ def infer_from_geojson(
             print(f"Processing block {processed_blocks + 1}/{total_blocks} (id={block_id})")
             print(" - canonicalising geometry")
         canon_geom, params = _to_canonical(geom)
+
+        # --- inference in canonical space ---
         if verbose:
-            print(" - generating buildings")
+            print(" - generating buildings (canonical space)")
         if not hasattr(model, "infer"):
             raise RuntimeError("Model does not provide an 'infer' method")
-        buildings = model.infer(canon_geom, n=n, zone_label=zone_label)  # type: ignore[operator]
+
+        raw_buildings = model.infer(canon_geom, n=n, zone_label=zone_label)  # type: ignore[operator]
+        canon_buildings = _normalize_model_output(raw_buildings)
+
         if verbose:
-            print(f" - generated {len(buildings)} buildings, transforming back and clipping")
+            print(f" - generated {len(canon_buildings)} raw buildings; inverse transform...")
 
-        transformed_buildings: List[Polygon] = buildings
-        if buildings and skgeom is not None:
-            try:  # pragma: no cover - heavy geometry branch
-                from example_canonical_transform import (
-                    get_polyskeleton_longest_path,
-                    modified_skel_to_medaxis,
-                )
-                from geo_utils import (
-                    inverse_warp_bldg_by_midaxis,
-                    get_block_aspect_ratio,
-                )
+        # try mid-axis warp first (if available), otherwise fallback
+        transformed_buildings: Optional[List[Polygon]] = _try_midaxis_inverse(
+            canon_geom, canon_buildings, verbose=verbose
+        )
+        if transformed_buildings is None:
+            transformed_buildings = canon_buildings
 
-                def _shapely_to_skgeom(poly: Polygon):
-                    exterior_polyline = list(poly.exterior.coords)[:-1]
-                    exterior_polyline.reverse()
-                    return skgeom.Polygon(exterior_polyline)
-
-                sk_blk = _shapely_to_skgeom(canon_geom)
-                skel = skgeom.skeleton.create_interior_straight_skeleton(sk_blk)
-                _, longest_skel = get_polyskeleton_longest_path(skel, sk_blk)
-                medaxis = modified_skel_to_medaxis(longest_skel, canon_geom)
-                aspect_rto = get_block_aspect_ratio(canon_geom, medaxis)
-                pos = np.array([[p.centroid.x, p.centroid.y] for p in buildings], dtype=float)
-                size = np.array(
-                    [[p.bounds[2] - p.bounds[0], p.bounds[3] - p.bounds[1]] for p in buildings],
-                    dtype=float,
-                )
-                transformed_buildings, _, _ = inverse_warp_bldg_by_midaxis(
-                    pos, size, medaxis, aspect_rto
-                )
-            except Exception as e:
-                if verbose:
-                    print(f" - full reverse transform failed: {e}")
-                transformed_buildings = buildings
-
+        # --- map back to world, clip & clean ---
         world_buildings: List[Polygon] = []
         for b in transformed_buildings:
-            world_b = _from_canonical(b, params)
-            clipped = world_b
-            if world_b.difference(geom).area > 1e-9:
-                clipped = world_b.intersection(geom)
-                if clipped.is_empty:
-                    continue
-            world_buildings.append(clipped)
-            b_props = {zone_attr: zone_label, "block_id": block_id}
-            features.append(
-                {"type": "Feature", "properties": b_props, "geometry": mapping(clipped)}
-            )
+            wb = _from_canonical(b, params)
+            wb = _make_valid(wb)
+            if _polygon_area(wb) < min_area:
+                continue
+            clipped_parts = _safe_clip_to_block(wb, geom)
+            for cp in clipped_parts:
+                if _polygon_area(cp) >= min_area:
+                    world_buildings.append(cp)
 
-        # best-effort reverse transform using dataset graph utilities
+        # dedupe near-duplicates
+        if dedupe_iou > 0 and len(world_buildings) > 1:
+            world_buildings = _nms(world_buildings, dedupe_iou)
+
+        # export features + (optional) derive graph stats for debugging
         if world_buildings:
+            pos = np.array([[p.centroid.x, p.centroid.y] for p in world_buildings], dtype=float)
+            size = np.array(
+                [[p.bounds[2] - p.bounds[0], p.bounds[3] - p.bounds[1]] for p in world_buildings],
+                dtype=float,
+            )
+            aspect_ratio = (
+                params.get("scale_y", 1.0) / params.get("scale_x", 1.0)
+                if params.get("scale_x")
+                else 1.0
+            )
             try:
-                pos = np.array(
-                    [[p.centroid.x, p.centroid.y] for p in world_buildings], dtype=float
-                )
-                size = np.array(
-                    [
-                        [p.bounds[2] - p.bounds[0], p.bounds[3] - p.bounds[1]]
-                        for p in world_buildings
-                    ],
-                    dtype=float,
-                )
-                aspect_ratio = (
-                    params.get("scale_y", 1.0) / params.get("scale_x", 1.0)
-                    if params.get("scale_x")
-                    else 1.0
-                )
-                _build_graph_original(
-                    geom, pos, size, aspect_ratio, k_nn=6, mask_size=128
-                )
+                _build_graph_original(geom, pos, size, aspect_ratio, k_nn=k_nn, mask_size=mask_size)
             except Exception:
                 if verbose:
-                    print(" - reverse transform failed, continuing")
+                    print(" - graph build failed (non-fatal)")
+
+            for b in world_buildings:
+                b_props = {zone_attr: zone_label, "block_id": block_id}
+                features.append(
+                    {"type": "Feature", "properties": b_props, "geometry": mapping(b)}
+                )
 
         processed_blocks += 1
         if verbose:
