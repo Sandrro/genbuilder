@@ -102,6 +102,10 @@ def setup_logger(level: str = "INFO") -> logging.Logger:
 # --------------------- helpers ---------------------
 
 def shapely_to_skgeom_polygon(poly: Polygon):
+    if poly.geom_type != "Polygon":
+        raise NotImplementedError(
+            f"Unsupported block geometry: {poly.geom_type}"
+        )
     exterior_polyline = list(poly.exterior.coords)[:-1]
     exterior_polyline.reverse()
     return skgeom.Polygon(exterior_polyline)

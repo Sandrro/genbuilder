@@ -58,18 +58,11 @@ def get_extend_line(a, b, block, isfront, is_extend_from_end = False):
                 nearest_points_on_contour = i
     elif intersect.geom_type == 'Point':
         nearest_points_on_contour = intersect
-    # elif intersect.geom_type == 'LineString':
-    #     if not is_extend_from_end:
-    #         nearest_points_on_contour = a
-    #     else:
-    #         nearest_points_on_contour = b
     else:
-        if not is_extend_from_end:
-            nearest_points_on_contour = a
-        else:
-            nearest_points_on_contour = b
-        print('intersect: ', intersect)
-        print('unknow geom type on intersection: ', intersect.geom_type)
+        # unsupported intersection geometry (e.g., LineString/empty)
+        raise NotImplementedError(
+            f"Unsupported intersection geometry: {intersect.geom_type}"
+        )
 
     if not is_extend_from_end:
         if isfront:
