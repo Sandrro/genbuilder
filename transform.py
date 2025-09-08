@@ -250,7 +250,9 @@ def _process_block_worker(
     q: "mp.queues.Queue",
 ) -> None:
     """Runs heavy processing inside a child process and returns lightweight result via queue.
-    Puts ("ok", (pos, size, aspect_ratio)) on success; ("err", repr(e)) on failure.
+    Puts ("ok", (pos, size, aspect_ratio)) on success;
+    ("skip", repr(e)) on known geometry errors;
+    ("err", repr(e)) on other failures.
     """
     try:
         wlog = setup_logger(log_level)
@@ -269,6 +271,8 @@ def _process_block_worker(
 
         pos, size, ar = process_one(block, buildings, wlog)
         q.put(("ok", (pos, size, ar)))
+    except NotImplementedError as e:
+        q.put(("skip", repr(e)))
     except Exception as e:
         q.put(("err", repr(e)))
 
@@ -281,7 +285,7 @@ def run_block_with_timeout(
 ) -> Tuple[str, Optional[Tuple[np.ndarray, np.ndarray, float]], Optional[str]]:
     """Run the worker with a hard timeout using a *spawn* context (fork-unsafe libs!).
     Wait on the queue (not join) to avoid deadlocks from full pipes.
-    Returns (status, payload, error_msg), where status in {"ok","timeout","err"}.
+    Returns (status, payload, error_msg), where status in {"ok","timeout","err","skip"}.
     payload = (pos, size, aspect_ratio) on success.
     """
     ctx = mp.get_context("spawn")
@@ -313,8 +317,9 @@ def run_block_with_timeout(
 
     if status == "ok":
         return "ok", payload, None
-    else:
-        return "err", None, str(payload)
+    if status == "skip":
+        return "skip", None, str(payload)
+    return "err", None, str(payload)
 
 
 # --------------------- per-item handler (for thread pool) ---------------------
@@ -346,7 +351,7 @@ def handle_item(
     return {
         "basename": basename,
         "zone_label": zone_label,
-        "status": status,  # ok | timeout | err
+        "status": status,  # ok | timeout | err | skip
         "graph": G,
         "error": err,
         "elapsed": elapsed,
@@ -487,6 +492,7 @@ def main():
     ok = 0
     failed = 0
     skipped_single = 0
+    skipped_error = 0
     total_nodes = 0
     total_edges = 0
 
@@ -497,7 +503,7 @@ def main():
         pbar = None
 
     def finalize_result(res: Dict[str, Any]) -> None:
-        nonlocal ok, failed, skipped_single, total_nodes, total_edges
+        nonlocal ok, failed, skipped_single, skipped_error, total_nodes, total_edges
         basename = res["basename"]
         zone_label = res["zone_label"]
         status = res["status"]
@@ -538,6 +544,13 @@ def main():
                 pbar.update(1)
             if args.strict:
                 raise RuntimeError(f"Failed on {basename}: {err}")
+            return
+
+        if status == "skip":
+            skipped_error += 1
+            logger.warning("  • Skipping %s due to geometry error: %s", basename, err)
+            if pbar is not None:
+                pbar.update(1)
             return
 
         try:
@@ -604,15 +617,17 @@ def main():
         "processed": len(cache),
         "saved": ok,
         "skipped_single": skipped_single,
+        "skipped_error": skipped_error,
         "failed": failed,
         "total_nodes": total_nodes,
         "total_edges": total_edges,
     }
     logger.info(
-        "Done. Processed=%d | Saved=%d | Skipped=%d | Failed=%d | out_dir=%s",
+        "Done. Processed=%d | Saved=%d | Skipped(single=%d, error=%d) | Failed=%d | out_dir=%s",
         summary["processed"],
         summary["saved"],
         summary["skipped_single"],
+        summary["skipped_error"],
         summary["failed"],
         str(args.out_dir),
     )
