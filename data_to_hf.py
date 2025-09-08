@@ -4,6 +4,7 @@ import json
 import os
 import pickle
 from pathlib import Path
+import io
 
 import datasets as ds
 import numpy as np
@@ -110,11 +111,28 @@ def main():
 
     dataset.push_to_hub(args.repo, token=args.token, commit_message=args.commit_message)
 
+    api = HfApi()
     if zones_map is not None:
-        api = HfApi()
         api.upload_file(
             path_or_fileobj=str(zones_map_path),
             path_in_repo="_zones_map.json",
+            repo_id=args.repo,
+            repo_type="dataset",
+            token=args.token,
+            commit_message=args.commit_message,
+        )
+
+    params_path = data_dir / "_transform_params.json"
+    if params_path.is_file():
+        with params_path.open("r", encoding="utf-8") as pf:
+            params = json.load(pf)
+        card = (
+            f"# Dataset {args.repo}\n\n## Generation Parameters\n" +
+            "```json\n" + json.dumps(params, ensure_ascii=False, indent=2) + "\n```\n"
+        )
+        api.upload_file(
+            path_or_fileobj=io.BytesIO(card.encode("utf-8")),
+            path_in_repo="README.md",
             repo_id=args.repo,
             repo_type="dataset",
             token=args.token,

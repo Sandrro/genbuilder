@@ -419,6 +419,14 @@ def main():
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Persist transformation parameters for downstream consumers
+    params_path = args.out_dir / "_transform_params.json"
+    try:
+        with params_path.open("w", encoding="utf-8") as fh:
+            json.dump(vars(args), fh, ensure_ascii=False, indent=2)
+    except Exception as e:  # pragma: no cover - logging best effort
+        logger.error("Failed to write transform params: %s", e)
+
     # Timeout log path
     timeouts_path = args.out_dir / "_timeouts.jsonl"
 
