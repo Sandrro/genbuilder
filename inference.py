@@ -245,7 +245,11 @@ def _safe_clip_to_block(poly: Polygon, block: Polygon) -> List[Polygon]:
     clipped = poly.intersection(block)
     if clipped.is_empty:
         return []
-    return [g for g in _flatten_polys(_make_valid(clipped)) if _polygon_area(g) > 0]
+    return [
+        g.simplify(0)
+        for g in _flatten_polys(_make_valid(clipped))
+        if _polygon_area(g) > 0
+    ]
 
 
 # ==============================
@@ -346,7 +350,7 @@ def infer_from_geojson(
     verbose: bool = True,
     # new knobs
     buffer_margin: float = 5.0,
-    min_area: float = 1.0,  # m^2
+    min_area: float = 1e-3,  # m^2
     dedupe_iou: float = 0.6,
     k_nn: int = 6,
     mask_size: int = 128,
