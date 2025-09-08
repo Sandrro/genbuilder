@@ -455,7 +455,11 @@ def main():
     params_path = args.out_dir / "_transform_params.json"
     try:
         with params_path.open("w", encoding="utf-8") as fh:
-            json.dump(vars(args), fh, ensure_ascii=False, indent=2)
+            serialisable = {
+                k: (str(v) if isinstance(v, Path) else v)
+                for k, v in vars(args).items()
+            }
+            json.dump(serialisable, fh, ensure_ascii=False, indent=2)
     except Exception as e:  # pragma: no cover - logging best effort
         logger.error("Failed to write transform params: %s", e)
 
