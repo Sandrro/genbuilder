@@ -25,6 +25,10 @@ import yaml
 import warnings
 warnings.filterwarnings("ignore")
 
+from huggingface_hub import HfApi
+from dataset_stats import process_directory
+import io
+
 # ----------------------- new: helpers for renaming -----------------------
 
 def _try_load_zones_map(dataset_root):
@@ -356,6 +360,9 @@ if __name__ == "__main__":
     print('Start Training...')
     logging.info('Start Training...' )
 
+    train_hist = []
+    val_hist = []
+
     try:
         patience = int(opt.get('early_stop_patience', 0))
         no_improve = 0
@@ -364,6 +371,9 @@ if __name__ == "__main__":
             logging.info('Epoch %d/%d', epoch, opt['total_epochs'] - 1)
             t_acc, t_loss, t_zone_acc, t_geo = train(model, epoch, train_loader, device, opt, loss_dict, optimizer, scheduler)
             v_acc, v_loss, v_loss_geo, v_zone_acc, v_geo = validation(model, epoch, val_loader, device, opt, loss_dict, scheduler)
+
+            train_hist.append({'epoch': int(epoch), 'loss': float(t_loss), 'acc': float(t_acc)})
+            val_hist.append({'epoch': int(epoch), 'loss': float(v_loss), 'acc': float(v_acc)})
 
             if best_train_acc is None or t_acc >= best_train_acc:
                 best_train_acc = t_acc
@@ -420,3 +430,71 @@ if __name__ == "__main__":
     if opt['save_record']:
         logging.info('Least Train Loss: {:.7f}, Best Train exist accuracy: {:.7f}, Least Valid Loss: {:.7f}, Best Valid exist accuracy: {:.7f}, best valid geo loss {:.7f}'.format(best_train_loss, best_train_acc, best_val_loss, best_val_acc, best_val_geo_loss))
         print('Least Train Loss: {:.7f}, Best Train exist accuracy: {:.7f}, Least Valid Loss: {:.7f}, Best Valid exist accuracy: {:.7f}, best valid geo loss {:.7f}'.format(best_train_loss, best_train_acc, best_val_loss, best_val_acc, best_val_geo_loss))
+
+    # --- Push training report to HuggingFace model repo if configured ---
+    model_repo = os.environ.get('HF_MODEL_REPO')
+    hf_token = os.environ.get('HF_TOKEN')
+    if model_repo:
+        data_dir = os.path.join(dataset_path, 'processed')
+        if not os.path.isdir(data_dir):
+            data_dir = dataset_path
+        try:
+            data_stats = process_directory(data_dir)
+        except Exception as e:
+            data_stats = {'error': str(e)}
+        report = {
+            'params': opt,
+            'train_history': train_hist,
+            'val_history': val_hist,
+            'best': {
+                'train_acc': best_train_acc,
+                'train_loss': best_train_loss,
+                'val_acc': best_val_acc,
+                'val_loss': best_val_loss,
+                'val_geo_loss': best_val_geo_loss,
+            },
+            'data_path': dataset_path,
+            'data_stats': data_stats,
+        }
+        table_lines = [
+            '|epoch|train_loss|train_acc|val_loss|val_acc|',
+            '|---|---|---|---|---|',
+        ]
+        for t, v in zip(train_hist, val_hist):
+            table_lines.append(f"|{t['epoch']}|{t['loss']:.6f}|{t['acc']:.6f}|{v['loss']:.6f}|{v['acc']:.6f}|")
+        readme = (
+            '# Training Report\n\n'
+            f'## Data\nUsed dataset: `{dataset_path}`\n\n'
+            '### Data statistics\n'
+            '```json\n' + json.dumps(data_stats, ensure_ascii=False, indent=2) + '\n```\n\n'
+            '## Training parameters\n'
+            '```json\n' + json.dumps(opt, ensure_ascii=False, indent=2) + '\n```\n\n'
+            '## Training history\n'
+            + '\n'.join(table_lines) + '\n\n'
+            '## Best metrics\n'
+            f'- best_train_loss: {best_train_loss}\n'
+            f'- best_train_acc: {best_train_acc}\n'
+            f'- best_val_loss: {best_val_loss}\n'
+            f'- best_val_acc: {best_val_acc}\n'
+            f'- best_val_geo_loss: {best_val_geo_loss}\n'
+        )
+        api = HfApi()
+        try:
+            api.upload_file(
+                path_or_fileobj=io.BytesIO(readme.encode('utf-8')),
+                path_in_repo='README.md',
+                repo_id=model_repo,
+                repo_type='model',
+                token=hf_token,
+                commit_message='update training report',
+            )
+            api.upload_file(
+                path_or_fileobj=io.BytesIO(json.dumps(report, ensure_ascii=False, indent=2).encode('utf-8')),
+                path_in_repo='training_stats.json',
+                repo_id=model_repo,
+                repo_type='model',
+                token=hf_token,
+                commit_message='training stats',
+            )
+        except Exception as e:
+            logging.error('Failed to upload training report: %s', e)
