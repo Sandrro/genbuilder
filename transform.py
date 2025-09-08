@@ -20,6 +20,9 @@ Changes in this version:
         NetworkX graph + mask are built in the parent thread.
       - Parent waits on the queue with timeout (no blocking join before reading).
       - Pre-sanitize polygons (make_valid/buffer(0)) to avoid CGAL hangs on invalid input.
+  6) Optional deterministic behaviour via --seed/--np-seed. The script seeds Python's
+     ``random`` and NumPy at startup and each worker re-seeds before heavy geometry
+     operations, providing reproducible results across runs.
 
 Output per-graph node attrs (exact names expected by original urban_dataset.py):
   - posx, posy      : float
@@ -48,6 +51,7 @@ import json
 import sys
 import time
 import logging
+import random
 from typing import List, Tuple, Optional, Dict, Any
 import multiprocessing as mp
 from datetime import datetime, timezone
@@ -248,11 +252,19 @@ def _process_block_worker(
     buildings: List[Polygon],
     log_level: str,
     q: "mp.queues.Queue",
+    seed: Optional[int],
+    np_seed: Optional[int],
 ) -> None:
-    """Runs heavy processing inside a child process and returns lightweight result via queue.
-    Puts ("ok", (pos, size, aspect_ratio)) on success; ("err", repr(e)) on failure.
+    """Runs heavy processing inside a child process and returns lightweight result via
+    queue. RNGs are seeded with the provided ``seed`` and ``np_seed``. Puts ("ok",
+    (pos, size, aspect_ratio)) on success; ("err", repr(e)) on failure.
     """
     try:
+        if seed is not None:
+            random.seed(seed)
+        if np_seed is not None:
+            np.random.seed(np_seed)
+
         wlog = setup_logger(log_level)
         wlog.propagate = False
 
@@ -278,15 +290,17 @@ def run_block_with_timeout(
     buildings: List[Polygon],
     timeout_secs: int,
     log_level: str,
+    seed: Optional[int],
+    np_seed: Optional[int],
 ) -> Tuple[str, Optional[Tuple[np.ndarray, np.ndarray, float]], Optional[str]]:
     """Run the worker with a hard timeout using a *spawn* context (fork-unsafe libs!).
-    Wait on the queue (not join) to avoid deadlocks from full pipes.
-    Returns (status, payload, error_msg), where status in {"ok","timeout","err"}.
-    payload = (pos, size, aspect_ratio) on success.
+    Wait on the queue (not join) to avoid deadlocks from full pipes. Seeds are forwarded
+    to the subprocess. Returns (status, payload, error_msg), where status in
+    {"ok","timeout","err"}. payload = (pos, size, aspect_ratio) on success.
     """
     ctx = mp.get_context("spawn")
     q: "mp.queues.Queue" = ctx.Queue()
-    p = ctx.Process(target=_process_block_worker, args=(block, buildings, log_level, q))
+    p = ctx.Process(target=_process_block_worker, args=(block, buildings, log_level, q, seed, np_seed))
     p.daemon = False
     p.start()
 
@@ -325,15 +339,24 @@ def handle_item(
     mask_size: int,
     log_level: str,
     timeout_secs: int,
+    seed: Optional[int],
+    np_seed: Optional[int],
 ) -> Dict[str, Any]:
     basename, block, buildings, zone_label = item
     t0 = time.perf_counter()
+
+    if seed is not None:
+        random.seed(seed)
+    if np_seed is not None:
+        np.random.seed(np_seed)
 
     status, payload, err = run_block_with_timeout(
         block=block,
         buildings=buildings,
         timeout_secs=timeout_secs,
         log_level=log_level,
+        seed=seed,
+        np_seed=np_seed,
     )
 
     G: Optional[nx.Graph] = None
@@ -372,6 +395,8 @@ def main():
         default=None,
         help="start processing from the given input basename (e.g., block_004431)",
     )
+    ap.add_argument("--seed", type=int, default=None, help="Python random seed")
+    ap.add_argument("--np-seed", type=int, default=None, help="NumPy random seed")
     ap.add_argument(
         "--workers",
         type=int,
@@ -399,12 +424,17 @@ def main():
     )
     args = ap.parse_args()
 
+    if args.seed is not None:
+        random.seed(args.seed)
+    if args.np_seed is not None:
+        np.random.seed(args.np_seed)
+
     logger = setup_logger(args.log_level)
     t_start = time.perf_counter()
 
     logger.info("Starting canonical transform")
     logger.info(
-        "Args: raw_dir=%s | out_dir=%s | knn=%d | mask=%d | start_from=%s | workers=%d | timeout_min=%d | strict=%s | dry_run=%s | skip_single=%s",
+        "Args: raw_dir=%s | out_dir=%s | knn=%d | mask=%d | start_from=%s | workers=%d | timeout_min=%d | strict=%s | dry_run=%s | skip_single=%s | seed=%s | np_seed=%s",
         str(args.raw_dir),
         str(args.out_dir),
         args.knn,
@@ -415,6 +445,8 @@ def main():
         args.strict,
         args.dry_run,
         args.skip_single,
+        str(args.seed),
+        str(args.np_seed),
     )
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -591,7 +623,18 @@ def main():
     futures = []
     with ThreadPoolExecutor(max_workers=max(1, int(args.workers))) as ex:
         for item in cache:
-            futures.append(ex.submit(handle_item, item, args.knn, args.mask_size, args.log_level, timeout_secs))
+            futures.append(
+                ex.submit(
+                    handle_item,
+                    item,
+                    args.knn,
+                    args.mask_size,
+                    args.log_level,
+                    timeout_secs,
+                    args.seed,
+                    args.np_seed,
+                )
+            )
         for fut in as_completed(futures):
             try:
                 res = fut.result()
