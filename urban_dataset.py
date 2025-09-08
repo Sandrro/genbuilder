@@ -102,7 +102,8 @@ def graph2vector_processed(g: nx.Graph):
     size_x = get_node_attribute(g, 'size_x', np.float64, 0.0)
     size_y = get_node_attribute(g, 'size_y', np.float64, 0.0)
 
-    # Normalize position and size attributes to [0, 1]
+    # Normalize sizes using the long side if available.
+    # Positions are left in their original scale to avoid unintended re-scaling.
     scale = float(longside) if float(longside) > 0 else 1.0
     if scale == 1.0:
         # Fallback to maximum coordinate if long_side is not provided or invalid
@@ -110,10 +111,9 @@ def graph2vector_processed(g: nx.Graph):
         max_coord = float(np.max(np.abs(coords)))
         if max_coord > 0:
             scale = max_coord
-    posx = posx / scale
-    posy = posy / scale
-    size_x = size_x / scale
-    size_y = size_y / scale
+    if scale > 0:
+        size_x = size_x / scale
+        size_y = size_y / scale
     longside = scale
 
     exist = get_node_attribute(g, 'exist', np.int_, 1)
