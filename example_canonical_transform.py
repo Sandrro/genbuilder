@@ -455,6 +455,22 @@ def get_extend_line(a, b, block, isfront, is_extend_from_end = False):
     return line_to_contour
 
 def modified_skel_to_medaxis(longest_skel, block):
+    """Extend skeleton to block boundaries and return mid-axis.
+
+    ``longest_skel`` may sometimes be a ``MultiLineString`` (Shapely 2.x
+    represents collections differently and accessing ``.coords`` on a multi
+    geometry raises ``NotImplementedError``).  In such cases we pick the
+    longest constituent ``LineString`` before proceeding.  This mirrors the
+    intent of the original code which expected a single line.
+    """
+
+    # ``longest_skel`` can be MultiLineString; choose the longest part
+    if getattr(longest_skel, "geom_type", None) == "MultiLineString":
+        parts = list(longest_skel.geoms)
+        if not parts:
+            return longest_skel
+        longest_skel = max(parts, key=lambda g: g.length)
+
     coords = np.array(longest_skel.coords.xy)
     if coords.shape[1] <=3:
         return longest_skel
