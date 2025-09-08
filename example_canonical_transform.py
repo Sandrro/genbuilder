@@ -1,6 +1,14 @@
 import os, re, itertools
 import networkx as nx
-from shapely.geometry import Point, LineString, Polygon, MultiPolygon, box, MultiLineString
+from shapely.geometry import (
+    Point,
+    LineString,
+    Polygon,
+    MultiPolygon,
+    box,
+    MultiLineString,
+    GeometryCollection,
+)
 import matplotlib.pyplot as plt
 import numpy as np
 import cv2
@@ -457,19 +465,24 @@ def get_extend_line(a, b, block, isfront, is_extend_from_end = False):
 def modified_skel_to_medaxis(longest_skel, block):
     """Extend skeleton to block boundaries and return mid-axis.
 
-    ``longest_skel`` may sometimes be a ``MultiLineString`` (Shapely 2.x
-    represents collections differently and accessing ``.coords`` on a multi
-    geometry raises ``NotImplementedError``).  In such cases we pick the
-    longest constituent ``LineString`` before proceeding.  This mirrors the
-    intent of the original code which expected a single line.
+    ``longest_skel`` may sometimes be a ``MultiLineString`` or a
+    ``GeometryCollection``.  Shapely's collection types lack ``.coords`` and
+    raise ``NotImplementedError`` when accessed directly.  To mirror the
+    original expectation of a single ``LineString``, we select the longest line
+    component and continue with that.  Empty inputs are returned unchanged.
     """
 
-    # ``longest_skel`` can be MultiLineString; choose the longest part
-    if getattr(longest_skel, "geom_type", None) == "MultiLineString":
-        parts = list(longest_skel.geoms)
-        if not parts:
-            return longest_skel
-        longest_skel = max(parts, key=lambda g: g.length)
+    if longest_skel.is_empty:
+        return longest_skel
+
+    if isinstance(longest_skel, (MultiLineString, GeometryCollection)):
+        lines = [g for g in longest_skel.geoms if isinstance(g, LineString) and not g.is_empty]
+        if not lines:
+            return LineString()
+        longest_skel = max(lines, key=lambda g: g.length)
+
+    if not hasattr(longest_skel, "coords"):
+        return longest_skel
 
     coords = np.array(longest_skel.coords.xy)
     if coords.shape[1] <=3:

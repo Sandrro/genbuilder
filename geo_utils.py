@@ -1,5 +1,6 @@
 import shapely.affinity as sa
 from shapely.geometry import Point, LineString, Polygon, MultiPolygon, box, MultiLineString
+from shapely.ops import nearest_points
 import numpy as np
 import random
 import networkx as nx
@@ -50,26 +51,19 @@ def get_extend_line(a, b, block, isfront, is_extend_from_end = False):
         extended_line = LineString([a, Point(points_sorted_by_distance[0])])
     
 
-    min_dis = 9999999999.9
+    # ``nearest_points`` gracefully handles Point, LineString, MultiPoint,
+    # MultiLineString and other geometry collections.  In case the intersection
+    # is empty (which may occur with invalid or Z-dimension geometries), fall
+    # back to the original point so that the returned line has zero length
+    # rather than raising an exception.
+    target_pt = b if is_extend_from_end else a
     intersect = block.boundary.intersection(extended_line)
-    if intersect.geom_type == 'MultiPoint':
-        for i in intersect:
-            if i.distance(a) <= min_dis:
-                nearest_points_on_contour = i
-    elif intersect.geom_type == 'Point':
-        nearest_points_on_contour = intersect
-    # elif intersect.geom_type == 'LineString':
-    #     if not is_extend_from_end:
-    #         nearest_points_on_contour = a
-    #     else:
-    #         nearest_points_on_contour = b
+    if intersect.is_empty:
+        nearest_points_on_contour = target_pt
     else:
-        if not is_extend_from_end:
-            nearest_points_on_contour = a
-        else:
-            nearest_points_on_contour = b
-        print('intersect: ', intersect)
-        print('unknow geom type on intersection: ', intersect.geom_type)
+        # ``nearest_points`` returns a pair (source, target); the second element
+        # lies on ``intersect`` and is the closest location to ``target_pt``.
+        nearest_points_on_contour = nearest_points(target_pt, intersect)[1]
 
     if not is_extend_from_end:
         if isfront:
