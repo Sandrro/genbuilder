@@ -103,6 +103,26 @@ def _from_canonical(poly: Polygon, params: dict[str, Any]) -> Polygon:
     return affinity.rotate(unscaled, params["angle"], origin=origin)
 
 
+def _apply_transform(poly: Polygon, params: dict[str, Any]) -> Polygon:
+    """Apply the same canonical transform (rotate/scale/translate) used for the block
+    to an auxiliary geometry such as an existing building.
+
+    ``params`` must be the dictionary returned by :func:`_to_canonical` for the
+    corresponding block.
+    """
+
+    rotated = affinity.rotate(poly, -params["angle"], origin=params["origin"])
+    scaled = affinity.scale(
+        rotated,
+        xfact=1 / max(params.get("scale_x", 1.0), 1e-9),
+        yfact=1 / max(params.get("scale_y", 1.0), 1e-9),
+        origin=params["origin"],
+    )
+    return affinity.translate(
+        scaled, xoff=-params["shift"][0], yoff=-params["shift"][1]
+    )
+
+
 def _block_long_side(block: Polygon) -> float:
     """Return the length of the longer side of ``block``'s minimum rectangle."""
 
@@ -346,7 +366,7 @@ def infer_from_geojson(
     verbose: bool = True,
     # new knobs
     buffer_margin: float = 5.0,
-    min_area: float = 1.0,  # m^2
+    min_area: float = 0.0,  # m^2
     dedupe_iou: float = 0.6,
     k_nn: int = 6,
     mask_size: int = 128,
@@ -474,13 +494,55 @@ def infer_from_geojson(
             print(" - canonicalising geometry")
         canon_geom, params = _to_canonical(geom)
 
+        # --- optional conditioning buildings ---
+        raw_input_buildings = props.get("buildings") or []
+        canon_input_buildings: List[Polygon] = []
+        if isinstance(raw_input_buildings, (list, tuple)):
+            for b in raw_input_buildings:
+                try:
+                    poly = b if isinstance(b, (Polygon, MultiPolygon)) else shape(b)
+                    poly = _make_valid(poly)
+                    canon_poly = _apply_transform(poly, params)
+                    canon_input_buildings.extend(_flatten_polys(canon_poly))
+                except Exception:
+                    continue
+
+        pos = np.empty((0, 2))
+        size = np.empty((0, 2))
+        aspect_ratio = 1.0
+        cond_graph: Optional[nx.Graph] = None
+        if canon_input_buildings:
+            pos = np.array([[p.centroid.x, p.centroid.y] for p in canon_input_buildings], dtype=float)
+            size = np.array(
+                [[p.bounds[2] - p.bounds[0], p.bounds[3] - p.bounds[1]] for p in canon_input_buildings],
+                dtype=float,
+            )
+            order = np.argsort(pos[:, 0])
+            pos = pos[order]
+            size = size[order]
+            canon_input_buildings = [canon_input_buildings[i] for i in order]
+            aspect_ratio = (
+                params.get("scale_y", 1.0) / params.get("scale_x", 1.0)
+                if params.get("scale_x")
+                else 1.0
+            )
+            cond_graph = _build_graph_original(
+                canon_geom, pos, size, aspect_ratio, k_nn=k_nn, mask_size=mask_size
+            )
+            cond_graph.graph["zone"] = zone_label
+
         # --- inference in canonical space ---
         if verbose:
             print(" - generating buildings (canonical space)")
-        if not hasattr(model, "infer"):
-            raise RuntimeError("Model does not provide an 'infer' method")
 
-        raw_buildings = model.infer(canon_geom, n=n, zone_label=zone_label)  # type: ignore[operator]
+        infer_graph = getattr(model, "infer_graph", None)
+        if callable(infer_graph) and cond_graph is not None:
+            raw_buildings = infer_graph(cond_graph, n=n, zone_label=zone_label)  # type: ignore[misc]
+        else:
+            if not hasattr(model, "infer"):
+                raise RuntimeError("Model does not provide an 'infer' method")
+            raw_buildings = model.infer(canon_geom, n=n, zone_label=zone_label)  # type: ignore[operator]
+
         canon_buildings = _normalize_model_output(raw_buildings)
 
         if verbose:
@@ -500,8 +562,11 @@ def infer_from_geojson(
             wb = _make_valid(wb)
             if _polygon_area(wb) < min_area:
                 continue
-            clipped_parts = _safe_clip_to_block(wb, geom)
-            for cp in clipped_parts:
+            if wb.difference(geom).area < 1e-9:
+                parts = [wb]
+            else:
+                parts = _safe_clip_to_block(wb, geom)
+            for cp in parts:
                 if _polygon_area(cp) >= min_area:
                     world_buildings.append(cp)
 
