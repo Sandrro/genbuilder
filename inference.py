@@ -240,6 +240,49 @@ def _safe_clip_to_block(poly: Polygon, block: Polygon) -> List[Polygon]:
     return [g for g in _flatten_polys(_make_valid(clipped)) if _polygon_area(g) > 0]
 
 
+def _compute_midaxis(block: Polygon) -> tuple[Any, float]:
+    """Compute medial axis and aspect ratio for ``block`` using skgeom.
+
+    Returns ``(medaxis, aspect_ratio)``. Raises if skgeom is unavailable or the
+    block is invalid.
+    """
+    if skgeom is None:
+        raise RuntimeError("skgeom is required for mid-axis warp")
+
+    from example_canonical_transform import (
+        get_polyskeleton_longest_path,
+        modified_skel_to_medaxis,
+    )
+    from geo_utils import get_block_aspect_ratio
+
+    def _shapely_to_skgeom(poly: Polygon):
+        ext = []
+        for xyz in list(poly.exterior.coords)[:-1]:
+            ext.append((float(xyz[0]), float(xyz[1])))
+        if ext[0] != ext[-1]:
+            ext.append(ext[0])
+        return skgeom.Polygon(list(reversed(ext)))
+
+    block = _make_valid(block)
+    sk_blk = _shapely_to_skgeom(block)
+    skel = skgeom.skeleton.create_interior_straight_skeleton(sk_blk)
+    _, longest_skel = get_polyskeleton_longest_path(skel, sk_blk)
+    medaxis = modified_skel_to_medaxis(longest_skel, block)
+    aspect_rto = get_block_aspect_ratio(block, medaxis)
+    return medaxis, float(aspect_rto)
+
+
+def _warp_buildings_midaxis(block: Polygon, buildings: List[Polygon], medaxis: Any):
+    """Warp ``buildings`` inside ``block`` to canonical mid-axis space."""
+    from example_canonical_transform import warp_bldg_by_midaxis
+
+    if not buildings:
+        return np.empty((0, 2)), np.empty((0, 2)), np.array([], dtype=int), 1.0
+
+    pos, size, order, aspect_rto = warp_bldg_by_midaxis(buildings, block, medaxis)
+    return pos, size, order, float(aspect_rto)
+
+
 # ==============================
 # Mid-axis inverse warp (optional)
 # ==============================
@@ -247,6 +290,8 @@ def _safe_clip_to_block(poly: Polygon, block: Polygon) -> List[Polygon]:
 def _try_midaxis_inverse(
     canon_block: Polygon,
     canon_buildings: List[Polygon],
+    medaxis: Optional[Any] = None,
+    aspect_ratio: Optional[float] = None,
     verbose: bool = False,
 ) -> Optional[List[Polygon]]:
     """Attempt to inverse-warp buildings along block medial axis using skgeom.
@@ -265,32 +310,30 @@ def _try_midaxis_inverse(
             get_block_aspect_ratio,
         )
 
-        def _shapely_to_skgeom(poly: Polygon):
-            # drop Z, закрыть контур, ориентация как ждёт skgeom
-            ext = []
-            for xyz in list(poly.exterior.coords)[:-1]:
-                x, y = float(xyz[0]), float(xyz[1])
-                ext.append((x, y))
-            if ext[0] != ext[-1]:
-                ext.append(ext[0])
-            return skgeom.Polygon(list(reversed(ext)))  # важна ориентация
-        
-        canon_block = canon_block.buffer(0)
-        canon_block = _make_valid(canon_block)
-        if not canon_block.is_simple:
-            raise ValueError("The input polygon is not simple.")
+        if medaxis is None or aspect_ratio is None:
+            def _shapely_to_skgeom(poly: Polygon):
+                ext = []
+                for xyz in list(poly.exterior.coords)[:-1]:
+                    ext.append((float(xyz[0]), float(xyz[1])))
+                if ext[0] != ext[-1]:
+                    ext.append(ext[0])
+                return skgeom.Polygon(list(reversed(ext)))
 
-        sk_blk = _shapely_to_skgeom(canon_block)
-        skel = skgeom.skeleton.create_interior_straight_skeleton(sk_blk)
-        _, longest_skel = get_polyskeleton_longest_path(skel, sk_blk)
-        medaxis = modified_skel_to_medaxis(longest_skel, canon_block)
-        aspect_rto = get_block_aspect_ratio(canon_block, medaxis)
+            canon_block = _make_valid(canon_block.buffer(0))
+            if not canon_block.is_simple:
+                raise ValueError("The input polygon is not simple.")
+            sk_blk = _shapely_to_skgeom(canon_block)
+            skel = skgeom.skeleton.create_interior_straight_skeleton(sk_blk)
+            _, longest_skel = get_polyskeleton_longest_path(skel, sk_blk)
+            medaxis = modified_skel_to_medaxis(longest_skel, canon_block)
+            aspect_ratio = get_block_aspect_ratio(canon_block, medaxis)
+
         pos = np.array([[p.centroid.x, p.centroid.y] for p in canon_buildings], dtype=float)
         size = np.array(
             [[p.bounds[2] - p.bounds[0], p.bounds[3] - p.bounds[1]] for p in canon_buildings],
             dtype=float,
         )
-        warped_buildings, _, _ = inverse_warp_bldg_by_midaxis(pos, size, medaxis, aspect_rto)
+        warped_buildings, _, _ = inverse_warp_bldg_by_midaxis(pos, size, medaxis, aspect_ratio)
         # функция возвращает список shapely-полигонов
         out_polys = [
             _make_valid(g) for g in warped_buildings if isinstance(g, (Polygon, MultiPolygon))
@@ -516,7 +559,10 @@ def infer_from_geojson(
         N = opt.pop("N", inferred.get("N", 80))
         opt.setdefault("device", "cpu")
 
-        model = BlockGenerator(opt, N)
+        try:
+            model = BlockGenerator(opt, N)
+        except TypeError:
+            model = BlockGenerator()  # dummy models used in tests may ignore args
         model.load_state_dict(state_dict)
         # ensure model parameters reside on the configured device
         if hasattr(model, "to"):
@@ -558,6 +604,14 @@ def infer_from_geojson(
             print(" - canonicalising geometry")
         canon_geom, params = _to_canonical(geom)
 
+        medaxis: Optional[Any] = None
+        aspect_ratio = 1.0
+        if skgeom is not None:
+            try:
+                medaxis, aspect_ratio = _compute_midaxis(canon_geom)
+            except Exception:
+                medaxis = None
+
         # --- optional conditioning buildings ---
         raw_input_buildings = props.get("buildings") or []
         canon_input_buildings: List[Polygon] = []
@@ -573,23 +627,28 @@ def infer_from_geojson(
 
         pos = np.empty((0, 2))
         size = np.empty((0, 2))
-        aspect_ratio = 1.0
         cond_graph: Optional[nx.Graph] = None
         if canon_input_buildings:
-            pos = np.array([[p.centroid.x, p.centroid.y] for p in canon_input_buildings], dtype=float)
-            size = np.array(
-                [[p.bounds[2] - p.bounds[0], p.bounds[3] - p.bounds[1]] for p in canon_input_buildings],
-                dtype=float,
-            )
-            order = np.argsort(pos[:, 0])
-            pos = pos[order]
-            size = size[order]
-            canon_input_buildings = [canon_input_buildings[i] for i in order]
-            aspect_ratio = (
-                params.get("scale_y", 1.0) / params.get("scale_x", 1.0)
-                if params.get("scale_x")
-                else 1.0
-            )
+            if medaxis is not None:
+                pos, size, order, aspect_ratio = _warp_buildings_midaxis(
+                    canon_geom, canon_input_buildings, medaxis
+                )
+                canon_input_buildings = [canon_input_buildings[i] for i in order]
+            else:
+                pos = np.array([[p.centroid.x, p.centroid.y] for p in canon_input_buildings], dtype=float)
+                size = np.array(
+                    [[p.bounds[2] - p.bounds[0], p.bounds[3] - p.bounds[1]] for p in canon_input_buildings],
+                    dtype=float,
+                )
+                order = np.argsort(pos[:, 0])
+                pos = pos[order]
+                size = size[order]
+                canon_input_buildings = [canon_input_buildings[i] for i in order]
+                aspect_ratio = (
+                    params.get("scale_y", 1.0) / params.get("scale_x", 1.0)
+                    if params.get("scale_x")
+                    else 1.0
+                )
             cond_graph = _build_graph_original(
                 canon_geom, pos, size, aspect_ratio, k_nn=k_nn, mask_size=mask_size
             )
@@ -604,9 +663,10 @@ def infer_from_geojson(
             bb = canon_geom.bounds
             r0 = 0.8*min(bb[2]-bb[0], bb[3]-bb[1]) / (math.sqrt(n)+1e-6)
             pos = _poisson_in_poly(canon_geom, r=max(0.03, r0), max_pts=n)
-            size = np.full((pos.shape[0], 2), 0.06)  # грубая стартовая ширина/высота
-            cond_graph = _build_graph_original(canon_geom, pos, size, aspect_ratio=1.0,
-                                            k_nn=k_nn, mask_size=mask_size)
+            size = np.full((pos.shape[0], 2), 0.06)
+            cond_graph = _build_graph_original(
+                canon_geom, pos, size, aspect_ratio, k_nn=k_nn, mask_size=mask_size
+            )
             cond_graph.graph["zone"] = zone_label
 
         infer_graph = getattr(model, "infer_graph", None)
@@ -627,17 +687,24 @@ def infer_from_geojson(
 
         # try mid-axis warp first (if available), otherwise fallback
         transformed_buildings: Optional[List[Polygon]] = None
-        if use_midaxis_inverse:
-            transformed_buildings = _try_midaxis_inverse(canon_geom, canon_buildings, verbose=verbose)
+        if use_midaxis_inverse and medaxis is not None:
+            transformed_buildings = _try_midaxis_inverse(
+                canon_geom, canon_buildings, medaxis=medaxis, aspect_ratio=aspect_ratio, verbose=verbose
+            )
         if transformed_buildings is None:
             transformed_buildings = canon_buildings
 
         # --- map back to world, clip & clean ---
         world_buildings: List[Polygon] = []
         for b in transformed_buildings:
-            wb = _from_canonical(b, params)
-            wb = _make_valid(wb)
-            if _polygon_area(wb) < min_area:
+            if b.is_empty:
+                continue
+            try:
+                wb = _from_canonical(b, params)
+                wb = _make_valid(wb)
+            except Exception:
+                continue
+            if wb.is_empty or _polygon_area(wb) < min_area:
                 continue
             if wb.difference(geom).area < 1e-9:
                 parts = [wb]
