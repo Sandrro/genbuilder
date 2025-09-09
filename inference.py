@@ -275,12 +275,10 @@ def _try_midaxis_inverse(
                 ext.append(ext[0])
             return skgeom.Polygon(list(reversed(ext)))  # важна ориентация
         
-        if not canon_block.is_valid:
-            try:
-                from shapely.validation import make_valid
-                canon_block = make_valid(canon_block)
-            except Exception:
-                canon_block = canon_block.buffer(0)
+        canon_block = canon_block.buffer(0)
+        canon_block = _make_valid(canon_block)
+        if not canon_block.is_simple:
+            raise ValueError("The input polygon is not simple.")
 
         sk_blk = _shapely_to_skgeom(canon_block)
         skel = skgeom.skeleton.create_interior_straight_skeleton(sk_blk)
