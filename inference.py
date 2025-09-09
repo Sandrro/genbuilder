@@ -1,4 +1,5 @@
 from typing import List, Dict, Any, Optional, Union, Iterable, Tuple
+from shapely.geometry import Point  # для _poisson_in_poly
 import os
 import math
 
@@ -41,47 +42,27 @@ except Exception:  # pragma: no cover
 # =========================
 
 def _to_canonical(poly: Polygon) -> tuple[Polygon, dict[str, Any]]:
-    """Rotate, scale and translate ``poly`` to a canonical unit frame.
-
-    The block is rotated so that its longest side becomes horizontal, then it
-    is scaled separately along the X and Y axes using the dimensions of the
-    minimum rotated rectangle (long and short side respectively).  Finally the
-    polygon is translated so that its centroid lies at the origin.
-
-    Returns
-    -------
-    (Polygon, dict)
-        The transformed polygon together with parameters required to invert
-        the transform via :func:`_from_canonical`.
-    """
-
     mrr = poly.minimum_rotated_rectangle
     coords = list(mrr.exterior.coords)
     edges = [(coords[i], coords[(i + 1) % 4]) for i in range(4)]
     lengths = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in edges]
-
     idx_long = max(range(4), key=lambda i: lengths[i])
-    idx_short = min(range(4), key=lambda i: lengths[i])
     a, b = edges[idx_long]
     angle = math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
 
-    long_side = lengths[idx_long]
-    short_side = lengths[idx_short] if lengths[idx_short] > 0 else 1.0
+    long_side = max(lengths) if max(lengths) > 0 else 1.0
 
     centroid = poly.centroid
     rotated = affinity.rotate(poly, -angle, origin=centroid)
-    scaled = affinity.scale(
-        rotated,
-        xfact=1 / max(long_side, 1e-9),
-        yfact=1 / max(short_side, 1e-9),
-        origin=centroid,
-    )
+
+    s = 1.0 / max(long_side, 1e-9)        # ИЗОТРОПНЫЙ масштаб
+    scaled = affinity.scale(rotated, xfact=s, yfact=s, origin=centroid)
+
     shifted_centroid = scaled.centroid
     translated = affinity.translate(scaled, xoff=-shifted_centroid.x, yoff=-shifted_centroid.y)
     params = {
         "angle": angle,
-        "scale_x": long_side,
-        "scale_y": short_side,
+        "scale": 1.0 / s,                 # один общий scale для обратного хода
         "origin": (centroid.x, centroid.y),
         "shift": (shifted_centroid.x, shifted_centroid.y),
     }
@@ -89,38 +70,29 @@ def _to_canonical(poly: Polygon) -> tuple[Polygon, dict[str, Any]]:
 
 
 def _from_canonical(poly: Polygon, params: dict[str, Any]) -> Polygon:
-    """Apply inverse of :func:`_to_canonical` using ``params``."""
-
     xoff, yoff = params["shift"]
     origin = params["origin"]
     unshifted = affinity.translate(poly, xoff=xoff, yoff=yoff)
-    unscaled = affinity.scale(
-        unshifted,
-        xfact=params.get("scale_x", 1.0),
-        yfact=params.get("scale_y", 1.0),
-        origin=origin,
-    )
+    if "scale" in params:  # новый изотропный
+        unscaled = affinity.scale(unshifted, xfact=params["scale"], yfact=params["scale"], origin=origin)
+    else:                  # совместимость со старым анизотропным
+        unscaled = affinity.scale(unshifted,
+                                  xfact=params.get("scale_x", 1.0),
+                                  yfact=params.get("scale_y", 1.0),
+                                  origin=origin)
     return affinity.rotate(unscaled, params["angle"], origin=origin)
 
-
 def _apply_transform(poly: Polygon, params: dict[str, Any]) -> Polygon:
-    """Apply the same canonical transform (rotate/scale/translate) used for the block
-    to an auxiliary geometry such as an existing building.
-
-    ``params`` must be the dictionary returned by :func:`_to_canonical` for the
-    corresponding block.
-    """
-
     rotated = affinity.rotate(poly, -params["angle"], origin=params["origin"])
-    scaled = affinity.scale(
-        rotated,
-        xfact=1 / max(params.get("scale_x", 1.0), 1e-9),
-        yfact=1 / max(params.get("scale_y", 1.0), 1e-9),
-        origin=params["origin"],
-    )
-    return affinity.translate(
-        scaled, xoff=-params["shift"][0], yoff=-params["shift"][1]
-    )
+    if "scale" in params:
+        s = 1.0 / max(params["scale"], 1e-9)
+        scaled = affinity.scale(rotated, xfact=s, yfact=s, origin=params["origin"])
+    else:
+        scaled = affinity.scale(rotated,
+                                xfact=1 / max(params.get("scale_x", 1.0), 1e-9),
+                                yfact=1 / max(params.get("scale_y", 1.0), 1e-9),
+                                origin=params["origin"])
+    return affinity.translate(scaled, xoff=-params["shift"][0], yoff=-params["shift"][1])
 
 
 def _block_long_side(block: Polygon) -> float:
@@ -294,9 +266,21 @@ def _try_midaxis_inverse(
         )
 
         def _shapely_to_skgeom(poly: Polygon):
-            exterior_polyline = list(poly.exterior.coords)[:-1]
-            exterior_polyline.reverse()
-            return skgeom.Polygon(exterior_polyline)
+            # drop Z, закрыть контур, ориентация как ждёт skgeom
+            ext = []
+            for xyz in list(poly.exterior.coords)[:-1]:
+                x, y = float(xyz[0]), float(xyz[1])
+                ext.append((x, y))
+            if ext[0] != ext[-1]:
+                ext.append(ext[0])
+            return skgeom.Polygon(list(reversed(ext)))  # важна ориентация
+        
+        if not canon_block.is_valid:
+            try:
+                from shapely.validation import make_valid
+                canon_block = make_valid(canon_block)
+            except Exception:
+                canon_block = canon_block.buffer(0)
 
         sk_blk = _shapely_to_skgeom(canon_block)
         skel = skgeom.skeleton.create_interior_straight_skeleton(sk_blk)
@@ -354,6 +338,87 @@ def _normalize_model_output(
     # last resort — nothing usable
     return []
 
+def _poisson_in_poly(poly: Polygon, r: float, k: int = 20, max_pts: Optional[int] = None):
+    # простой Bridson 2D в bbox с отбрасыванием вне полигона
+    import random, math
+    minx, miny, maxx, maxy = poly.bounds
+    cell = r / math.sqrt(2)
+    gx = int((maxx - minx) / cell) + 1
+    gy = int((maxy - miny) / cell) + 1
+    grid = [[-1]*gy for _ in range(gx)]
+    samples, active = [], []
+
+    def grid_idx(p):
+        return int((p[0]-minx)/cell), int((p[1]-miny)/cell)
+
+    # старт в центре масс
+    p0 = (float(poly.centroid.x), float(poly.centroid.y))
+    samples.append(p0); active.append(0)
+    gi, gj = grid_idx(p0); grid[gi][gj] = 0
+
+    while active and (max_pts is None or len(samples) < max_pts):
+        i = random.choice(active)
+        ox, oy = samples[i]
+        ok = False
+        for _ in range(k):
+            ang = random.random()*2*math.pi
+            rad = r*(1+random.random())
+            px, py = ox+rad*math.cos(ang), oy+rad*math.sin(ang)
+            if not poly.contains(Point(px, py)):  # type: ignore
+                continue
+            gi, gj = grid_idx((px, py))
+            good = True
+            for ii in range(max(0, gi-2), min(gx, gi+3)):
+                for jj in range(max(0, gj-2), min(gy, gj+3)):
+                    idx = grid[ii][jj]
+                    if idx >= 0:
+                        dx = samples[idx][0]-px; dy = samples[idx][1]-py
+                        if dx*dx+dy*dy < r*r:
+                            good = False; break
+                if not good: break
+            if good:
+                samples.append((px, py)); active.append(len(samples)-1)
+                grid[gi][gj] = len(samples)-1; ok = True
+                break
+        if not ok:
+            active.remove(i)
+    return np.array(samples, dtype=float)
+
+def _enforce_spacing(polys, block, min_gap=4.0, min_centroid=8.0, iters=10):
+    # 1) внутренняя область
+    inner = block.buffer(-min_gap) if min_gap>0 else block
+    out = []
+    for p in polys:
+        c = p.centroid
+        if not inner.contains(c):
+            v = np.array([inner.centroid.x - c.x, inner.centroid.y - c.y], float)
+            n = np.linalg.norm(v) or 1.0
+            p = affinity.translate(p, xoff=float(v[0]/n*min_gap*0.5), yoff=float(v[1]/n*min_gap*0.5))
+        p = _make_valid(p).intersection(inner)
+        if not p.is_empty and _polygon_area(p) > 0: out.extend(_flatten_polys(p))
+
+    # 2) лёгкое «отталкивание» центроидов
+    pts = np.array([[q.centroid.x, q.centroid.y] for q in out], float)
+    for _ in range(iters):
+        moved = False
+        for i in range(len(out)):
+            for j in range(i+1, len(out)):
+                d = np.linalg.norm(pts[i]-pts[j])
+                if d < 1e-6:  # совпадение
+                    jitter = np.random.randn(2); jitter/=np.linalg.norm(jitter)
+                    pts[i]+=jitter*0.5; pts[j]-=jitter*0.5; moved=True; continue
+                if d < min_centroid:
+                    step = (min_centroid - d)*0.5
+                    dirv = (pts[i]-pts[j])/d
+                    pts[i]+=dirv*step; pts[j]-=dirv*step; moved=True
+        if not moved: break
+    # применить смещения и обрезать
+    res=[]
+    for k, p in enumerate(out):
+        q = affinity.translate(p, xoff=float(pts[k][0]-p.centroid.x), yoff=float(pts[k][1]-p.centroid.y))
+        q = _make_valid(q).intersection(inner)
+        if not q.is_empty and _polygon_area(q)>0: res.extend(_flatten_polys(q))
+    return res
 
 def infer_from_geojson(
     geojson: Dict[str, Any],
@@ -363,6 +428,7 @@ def infer_from_geojson(
     model_file: Optional[str] = None,
     hf_token: Optional[str] = None,
     model: Optional[Any] = None,
+    use_midaxis_inverse: bool = False,
     verbose: bool = True,
     # new knobs
     buffer_margin: float = 5.0,
@@ -534,8 +600,21 @@ def infer_from_geojson(
         # --- inference in canonical space ---
         if verbose:
             print(" - generating buildings (canonical space)")
+        
+        if not canon_input_buildings:
+            # радиус берём как ~ ширина квартала / sqrt(n)
+            bb = canon_geom.bounds
+            r0 = 0.8*min(bb[2]-bb[0], bb[3]-bb[1]) / (math.sqrt(n)+1e-6)
+            pos = _poisson_in_poly(canon_geom, r=max(0.03, r0), max_pts=n)
+            size = np.full((pos.shape[0], 2), 0.06)  # грубая стартовая ширина/высота
+            cond_graph = _build_graph_original(canon_geom, pos, size, aspect_ratio=1.0,
+                                            k_nn=k_nn, mask_size=mask_size)
+            cond_graph.graph["zone"] = zone_label
 
         infer_graph = getattr(model, "infer_graph", None)
+        if verbose:
+            print(" - using infer_graph(cond_graph)" if callable(infer_graph) and cond_graph is not None
+                else " - using infer(block)  [no graph]")
         if callable(infer_graph) and cond_graph is not None:
             raw_buildings = infer_graph(cond_graph, n=n, zone_label=zone_label)  # type: ignore[misc]
         else:
@@ -549,9 +628,9 @@ def infer_from_geojson(
             print(f" - generated {len(canon_buildings)} raw buildings; inverse transform...")
 
         # try mid-axis warp first (if available), otherwise fallback
-        transformed_buildings: Optional[List[Polygon]] = _try_midaxis_inverse(
-            canon_geom, canon_buildings, verbose=verbose
-        )
+        transformed_buildings: Optional[List[Polygon]] = None
+        if use_midaxis_inverse:
+            transformed_buildings = _try_midaxis_inverse(canon_geom, canon_buildings, verbose=verbose)
         if transformed_buildings is None:
             transformed_buildings = canon_buildings
 
@@ -569,6 +648,27 @@ def infer_from_geojson(
             for cp in parts:
                 if _polygon_area(cp) >= min_area:
                     world_buildings.append(cp)
+
+        def zone_gap(zone):
+            z = (str(zone) or "").lower()
+            if "residential" in z:   return 3.5  # м до границ/между домами
+            if "industrial" in z:  return 6.0
+            if "business" in z:   return 4.5
+            return 4.0
+
+        def zone_centroid(zone):
+            z = (str(zone) or "").lower()
+            if "residential" in z:   return 8.0   # м между центрами
+            if "industrial" in z:  return 12.0
+            if "business" in z:   return 9.0
+            return 8.0
+
+        world_buildings = _enforce_spacing(world_buildings, geom,
+                                   min_gap=zone_gap(zone_label),
+                                   min_centroid=zone_centroid(zone_label),
+                                   iters=12)
+        # NMS строже
+        world_buildings = _nms(world_buildings, iou_thr=0.35)
 
         # dedupe near-duplicates
         if dedupe_iou > 0 and len(world_buildings) > 1:

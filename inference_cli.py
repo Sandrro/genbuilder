@@ -39,6 +39,16 @@ def main() -> None:
     parser.add_argument("--zone-attr", default="zone", help="Name of zone attribute in input GeoJSON")
     parser.add_argument("--output", required=True, help="Output GeoJSON file path")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
+    parser.add_argument("--use-midaxis-inverse", action="store_true",
+                        help="Inverse-warp along medial axis before mapping back")
+    parser.add_argument("--buffer-margin", type=float, default=6.0,
+                        help="Inner buffer of block (m) to keep away from edges")
+    parser.add_argument("--min-gap", type=float, default=4.0,
+                       help="Minimum gap to block boundary and between buildings (m)")
+    parser.add_argument("--min-centroid", type=float, default=14.0,
+                        help="Minimum centroid-to-centroid distance (m)")
+    parser.add_argument("--dedupe-iou", type=float, default=0.35,
+                        help="IoU threshold for NMS deduplication")
     args = parser.parse_args()
 
     with open(args.blocks, "r", encoding="utf-8") as f:
@@ -56,6 +66,9 @@ def main() -> None:
         model_repo=args.model_repo,
         model_file=args.model_file,
         hf_token=args.hf_token,
+        use_midaxis_inverse=args.use_midaxis_inverse,
+        buffer_margin=args.buffer_margin,
+        dedupe_iou=args.dedupe_iou,
         verbose=args.verbose,
     )
 
