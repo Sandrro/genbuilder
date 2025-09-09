@@ -12,7 +12,7 @@ def get_extend_line(a, b, block, isfront, is_extend_from_end = False):
     minx, miny, maxx, maxy = block.bounds
     if a.x == b.x:  # vertical line
         if a.y <= b.y:
-            extended_line = LineString([a, (a.x, minx)])
+            extended_line = LineString([a, (a.x, miny)])
         else:
             extended_line = LineString([a, (a.x, maxy)])
     elif a.y == b.y:  # horizonthal line
