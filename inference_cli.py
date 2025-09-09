@@ -45,7 +45,7 @@ def main() -> None:
                         help="Inner buffer of block (m) to keep away from edges")
     parser.add_argument("--min-gap", type=float, default=4.0,
                        help="Minimum gap to block boundary and between buildings (m)")
-    parser.add_argument("--min-centroid", type=float, default=14.0,
+    parser.add_argument("--min-centroid", type=float, default=9.0,
                         help="Minimum centroid-to-centroid distance (m)")
     parser.add_argument("--dedupe-iou", type=float, default=0.35,
                         help="IoU threshold for NMS deduplication")
