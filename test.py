@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Download processed graphs from a HF dataset and export one block per zone.
 
-The script relies on the ``datasets-cli`` command line utility to fetch the
-remote dataset snapshot.  After downloading, it inspects the ``_zones_map.json``
-file to discover available functional zones and copies a single graph (city
-block) for each zone into an output directory.
+The script relies on the ``huggingface_hub`` library to fetch the remote dataset
+snapshot.  After downloading, it inspects the ``_zones_map.json`` file to
+discover available functional zones and copies a single graph (city block) for
+each zone into an output directory.
 
 Example:
     python test.py --repo user/dataset --out blocks
@@ -18,27 +18,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 from pathlib import Path
 from typing import Dict, Set
 
 import networkx as nx
+from huggingface_hub import snapshot_download
 
 
 def download_dataset(repo: str, dest: Path) -> None:
-    """Use ``datasets-cli`` to download ``repo`` into ``dest``."""
+    """Use ``huggingface_hub`` to download ``repo`` into ``dest``."""
     dest.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [
-            "datasets-cli",
-            "snapshot-download",
-            repo,
-            "--repo-type",
-            "dataset",
-            "-d",
-            str(dest),
-        ],
-        check=True,
+    snapshot_download(
+        repo_id=repo,
+        repo_type="dataset",
+        local_dir=dest,
+        local_dir_use_symlinks=False,
     )
 
 
