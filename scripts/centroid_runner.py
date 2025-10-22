@@ -1,4 +1,12 @@
-"""Utility helpers for running centroid inference through the training script."""
+# -*- coding: utf-8 -*-
+"""Utility helpers for running centroid inference through the training script.
+
+Правки:
+- Единый резолвер артефактов: BASE/artifacts/<file>
+- Нормализация относительных путей (обрезаем ведущий "artifacts/" или "./artifacts/")
+- Исключено удвоение "artifacts/artifacts"
+- Проброс окружения GENBUILDER_BASE_DIR=/app и GENBUILDER_ARTIFACTS_DIR=/app в сабпроцесс
+"""
 from __future__ import annotations
 
 import json
@@ -26,35 +34,59 @@ class InferParams(BaseModel):
     sv1_thr: float = Field(..., description="Threshold for the first service head")
 
 
+# Базовая директория проекта (…/app)
 _BASE_DIR = Path(__file__).resolve().parents[1]
-_ARTIFACTS_DIR = Path(os.getenv("GENBUILDER_ARTIFACTS_DIR", _BASE_DIR / "artifacts"))
+
+
+# ------------------------------------------------------------
+# Артефакты: BASE/artifacts/<file>
+# ------------------------------------------------------------
+
+def _artifact_path(name: str) -> Path:
+    """Собирает абсолютный путь к артефакту как BASE/artifacts/<name>."""
+    return _BASE_DIR / "artifacts" / name
+
+
+def _normalize_artifact(value: Optional[str], *, default_name: str) -> str:
+    """Нормализует путь к артефакту.
+
+    Правила:
+    - Если value = None → берём BASE/artifacts/<default_name>.
+    - Если путь абсолютный → возвращаем как есть.
+    - Если относительный → отрезаем ведущий префикс "artifacts/" или "./artifacts/",
+      далее собираем BASE/artifacts/<rest>.
+    """
+    if not value:
+        return str(_artifact_path(default_name))
+
+    p = Path(value)
+    if p.is_absolute():
+        return str(p)
+
+    # Строковая нормализация префикса
+    s = str(p).lstrip("./")
+    if s.startswith("artifacts/"):
+        s = s[len("artifacts/") :]
+    return str(_artifact_path(s))
 
 
 def _resolve_train_script() -> str:
+    """Сначала GENBUILDER_TRAIN_SCRIPT, иначе BASE/train.py."""
     return os.getenv("GENBUILDER_TRAIN_SCRIPT", str(_BASE_DIR / "train.py"))
 
 
 def _resolve_model_ckpt() -> str:
-    env_value = os.getenv("GENBUILDER_MODEL_CKPT")
-    if env_value:
-        return env_value
-    if _ARTIFACTS_DIR.exists():
-        for pattern in ("*.pt", "*.ckpt"):
-            matches = sorted(_ARTIFACTS_DIR.glob(pattern))
-            if matches:
-                return str(matches[0])
-    return str(_ARTIFACTS_DIR / "model.pt")
+    """Всегда приводим к BASE/artifacts/<file>, без удвоений."""
+    return _normalize_artifact(os.getenv("GENBUILDER_MODEL_CKPT"), default_name="graphgen_hcanon_v1.pt")
 
 
 def _resolve_config_path() -> Optional[str]:
-    env_value = os.getenv("GENBUILDER_CONFIG_PATH")
-    if env_value:
-        return env_value
-    candidate = _BASE_DIR / "train_gnn.yaml"
-    return str(candidate)
+    """Всегда приводим к BASE/artifacts/<file>, без удвоений."""
+    return _normalize_artifact(os.getenv("GENBUILDER_CONFIG_PATH"), default_name="train_config.json")
 
 
 def _resolve_device() -> str:
+    # Оставляем явным образом "cuda" (при необходимости можно сделать авто‑детект)
     return "cuda"
 
 
@@ -199,6 +231,20 @@ def _write_feature(path: Path, feature: Dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
+def _subprocess_env() -> Dict[str, str]:
+    """Окружение для train.py.
+
+    Важно: GENBUILDER_ARTIFACTS_DIR ставим в BASE (а не BASE/artifacts),
+    чтобы относительные пути вида "artifacts/<file>" внутри train.py собирались
+    в BASE/artifacts/<file> без удвоений.
+    """
+    env = os.environ.copy()
+    env.setdefault("GENBUILDER_BASE_DIR", str(_BASE_DIR))
+    env.setdefault("GENBUILDER_ARTIFACTS_DIR", str(_BASE_DIR))
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    return env
+
+
 def run_centroid_inference(request: CentroidRequest) -> List[Dict[str, Any]]:
     """Executes the training script to obtain centroid predictions for a single block."""
 
@@ -218,6 +264,7 @@ def run_centroid_inference(request: CentroidRequest) -> List[Dict[str, Any]]:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=_subprocess_env(),
         )
         log_entry = CommandLogEntry(
             timestamp=datetime.now(timezone.utc),
