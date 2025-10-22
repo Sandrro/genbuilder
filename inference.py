@@ -378,11 +378,6 @@ def main():
         infer_slots = args.infer_slots or infer_slots_from_block_bbox(geom, cell_size_m=100.0)
 
         people = get_people(feat.get("properties") or {}, args.people)
-        services_target = None
-        if args.min_services:
-            services_target = {
-                k: people for k in service_keys.values()
-            }
         la_target = None
         floors_avg = None
         targets = targets_map.get(zone_label)
@@ -397,12 +392,20 @@ def main():
         feat_payload_props.setdefault(args.zone_attr, zone_label)
         feat_payload["properties"] = feat_payload_props
 
+        la_value = la_target
+        if la_value is None:
+            la_value = get_living_area_value(feat_payload_props)
+        if la_value is None:
+            la_value = 0.0
+
+        floors_value = floors_avg
+        if floors_value is None:
+            floors_value = get_floors_value(feat_payload_props)
+        if floors_value is None:
+            floors_value = 0.0
+
         request_payload: Dict[str, Any] = {
-            "train_script": args.train_script,
-            "model_ckpt": args.model_ckpt,
-            "zone_attr": args.zone_attr,
             "zone_label": str(zone_label),
-            "request_id": f"block-{block_idx}",
             "feature": feat_payload,
             "infer_params": {
                 "slots": int(infer_slots),
@@ -411,17 +414,9 @@ def main():
                 "il_thr": float(args.infer_il_thr),
                 "sv1_thr": float(args.infer_sv1_thr),
             },
+            "la_target": float(la_value),
+            "floors_avg": float(floors_value),
         }
-        if args.config:
-            request_payload["config"] = args.config
-        if args.device:
-            request_payload["device"] = args.device
-        if services_target:
-            request_payload["services_target"] = services_target
-        if la_target is not None:
-            request_payload["la_target"] = la_target
-        if floors_avg is not None:
-            request_payload["floors_avg"] = floors_avg
 
         block_tasks.append(
             _BlockInferenceTask(
