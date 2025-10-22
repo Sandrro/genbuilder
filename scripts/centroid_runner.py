@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -10,8 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Iterable, List, Optional
+from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 
 class InferParams(BaseModel):
@@ -24,22 +26,86 @@ class InferParams(BaseModel):
     sv1_thr: float = Field(..., description="Threshold for the first service head")
 
 
+_BASE_DIR = Path(__file__).resolve().parents[1]
+_ARTIFACTS_DIR = Path(os.getenv("GENBUILDER_ARTIFACTS_DIR", _BASE_DIR / "artifacts"))
+
+
+def _resolve_train_script() -> str:
+    return os.getenv("GENBUILDER_TRAIN_SCRIPT", str(_BASE_DIR / "train.py"))
+
+
+def _resolve_model_ckpt() -> str:
+    env_value = os.getenv("GENBUILDER_MODEL_CKPT")
+    if env_value:
+        return env_value
+    if _ARTIFACTS_DIR.exists():
+        for pattern in ("*.pt", "*.ckpt"):
+            matches = sorted(_ARTIFACTS_DIR.glob(pattern))
+            if matches:
+                return str(matches[0])
+    return str(_ARTIFACTS_DIR / "model.pt")
+
+
+def _resolve_config_path() -> Optional[str]:
+    env_value = os.getenv("GENBUILDER_CONFIG_PATH")
+    if env_value:
+        return env_value
+    candidate = _BASE_DIR / "train_gnn.yaml"
+    return str(candidate)
+
+
+def _resolve_device() -> str:
+    return "cuda"
+
+
 class CentroidRequest(BaseModel):
     """Payload accepted by the centroid generation service."""
 
-    train_script: str
-    model_ckpt: str
-    zone_attr: str
-    zone_label: str
-    request_id: Optional[str] = None
-    feature: Dict[str, Any]
-    infer_params: InferParams
-    config: Optional[str] = None
-    device: Optional[str] = None
-    services_target: Optional[Dict[str, int]] = None
-    la_target: Optional[float] = None
-    floors_avg: Optional[float] = None
-    python_executable: Optional[str] = None
+    zone_label: str = Field(..., description="Identifier of the zone that owns the block")
+    feature: Dict[str, Any] = Field(..., description="GeoJSON feature representing the block")
+    infer_params: InferParams = Field(..., description="Parameters controlling inference")
+    la_target: float = Field(..., description="Target living area for the block")
+    floors_avg: float = Field(..., description="Average floors value for the block")
+
+    _request_id: str = PrivateAttr()
+    _zone_attr: str = PrivateAttr(default="zone")
+    _train_script: str = PrivateAttr(default_factory=_resolve_train_script)
+    _model_ckpt: str = PrivateAttr(default_factory=_resolve_model_ckpt)
+    _config: Optional[str] = PrivateAttr(default_factory=_resolve_config_path)
+    _device: str = PrivateAttr(default_factory=_resolve_device)
+    _python_executable: str = PrivateAttr(default_factory=lambda: sys.executable)
+
+    def __init__(self, **data: Any) -> None:  # type: ignore[override]
+        super().__init__(**data)
+        self._request_id = str(uuid4())
+
+    @property
+    def request_id(self) -> str:
+        return self._request_id
+
+    @property
+    def zone_attr(self) -> str:
+        return self._zone_attr
+
+    @property
+    def train_script(self) -> str:
+        return self._train_script
+
+    @property
+    def model_ckpt(self) -> str:
+        return self._model_ckpt
+
+    @property
+    def config(self) -> Optional[str]:
+        return self._config
+
+    @property
+    def device(self) -> str:
+        return self._device
+
+    @property
+    def python_executable(self) -> str:
+        return self._python_executable
 
 
 class CentroidResult(BaseModel):
@@ -117,8 +183,6 @@ def build_inference_command(request: CentroidRequest, in_path: Path, out_path: P
         cmd.extend(["--config", request.config])
     if request.device:
         cmd.extend(["--device", request.device])
-    if request.services_target:
-        cmd.extend(["--services-target", json.dumps(request.services_target)])
     if request.la_target is not None:
         cmd.extend(["--la-target", str(request.la_target)])
     if request.floors_avg is not None:
