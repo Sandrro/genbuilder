@@ -4,19 +4,31 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PYTHON_VERSION=3.9.23
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 python3-pip python3-dev \
       build-essential \
+      curl ca-certificates wget \
       gdal-bin libgdal-dev \
       libgeos-dev libproj-dev \
-      curl ca-certificates \
-  && ln -sf /usr/bin/python3 /usr/bin/python \
-  && python -m pip install --upgrade pip \
+      libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+      libncursesw5-dev xz-utils tk-dev libffi-dev liblzma-dev \
   && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSLO https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz \
+  && tar -xzf Python-${PYTHON_VERSION}.tgz \
+  && cd Python-${PYTHON_VERSION} \
+  && ./configure --enable-optimizations --with-ensurepip=install \
+  && make -j"$(nproc)" \
+  && make altinstall \
+  && cd .. \
+  && rm -rf Python-${PYTHON_VERSION} Python-${PYTHON_VERSION}.tgz \
+  && ln -sf /usr/local/bin/python3.9 /usr/local/bin/python3 \
+  && ln -sf /usr/local/bin/python3.9 /usr/local/bin/python \
+  && python -m pip install --upgrade pip
 
 ARG TORCH_VER=2.1.2
 ARG TORCHVISION_VER=0.16.2

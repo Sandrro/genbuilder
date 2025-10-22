@@ -3,7 +3,7 @@ uvicorn[standard]
 requests
 httpx
 pydantic
-numpy
+numpy<2
 pandas
 geopandas
 shapely
