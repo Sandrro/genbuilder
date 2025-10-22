@@ -27,7 +27,8 @@ train.py — обучение граф-генератора на иерархи�
 from __future__ import annotations
 import os, sys, json, math, time, argparse, logging, random
 from datetime import datetime
-from typing import Dict, Any, List, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
@@ -42,6 +43,105 @@ def setup_logger(level: str = "INFO"):
         format="%(asctime)s | %(levelname)s | %(processName)s | %(message)s",
         datefmt="%H:%M:%S",
     )
+
+# --- базовые пути проекта и артефактов ---
+_BASE_DIR = Path(os.getenv("GENBUILDER_BASE_DIR") or Path(__file__).resolve().parent)
+_ARTIFACTS_BASE = Path(os.getenv("GENBUILDER_ARTIFACTS_DIR") or _BASE_DIR)
+
+
+def _collect_artifact_roots(*anchors: Optional[str]) -> List[Path]:
+    """Собирает список директорий, в которых стоит искать артефакты."""
+
+    roots: List[Path] = []
+    seen: set[str] = set()
+
+    def _register(path: Path) -> None:
+        if not path:
+            return
+        try:
+            resolved = path.resolve()
+        except Exception:
+            resolved = Path(os.path.abspath(str(path)))
+        key = str(resolved)
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(resolved)
+
+    for anchor in anchors:
+        if not anchor:
+            continue
+        anchor_path = Path(anchor)
+        base = anchor_path.parent if anchor_path.suffix else anchor_path
+        _register(base)
+        _register(base / "artifacts")
+
+    for extra in (
+        Path.cwd(),
+        _BASE_DIR,
+        _BASE_DIR / "artifacts",
+        _ARTIFACTS_BASE,
+        _ARTIFACTS_BASE / "artifacts",
+    ):
+        _register(extra)
+
+    return roots
+
+
+def _resolve_artifact_path(
+    explicit: Optional[str],
+    *,
+    default_name: str,
+    roots: Sequence[Path],
+    label: str,
+    required: bool = True,
+) -> str:
+    """Находит существующий путь к артефакту, перебирая несколько директорий."""
+
+    attempts: List[Path] = []
+    seen: set[str] = set()
+
+    def _remember(path: Path) -> None:
+        if not path:
+            return
+        key = os.path.normpath(str(path))
+        if key in seen:
+            return
+        seen.add(key)
+        attempts.append(Path(key))
+
+    if explicit:
+        value_path = Path(explicit)
+        if value_path.is_absolute():
+            _remember(value_path)
+        else:
+            for root in roots:
+                _remember(root / value_path)
+
+    default_path = Path(default_name)
+    if default_name:
+        if default_path.is_absolute():
+            _remember(default_path)
+        else:
+            for root in roots:
+                _remember(root / default_path)
+
+    for candidate in attempts:
+        if candidate.exists():
+            return str(candidate)
+
+    if not required:
+        if attempts:
+            return str(attempts[0])
+        if explicit:
+            return explicit
+        if roots:
+            return str(roots[0] / default_name)
+        return default_name
+
+    attempted = "\n    ".join(str(p) for p in attempts) or (explicit or default_name)
+    raise FileNotFoundError(f"{label} not found. Tried:\n    {attempted}")
+
 
 # --- зависимости ---
 import numpy as np
@@ -2331,15 +2431,43 @@ def main():
     # режим инференса?
     if args.mode == "infer":
         # --- где брать словари зон/сервисов и нормализатор ---
-        if not os.path.exists(ckpt_path):
-            raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+        artifact_roots = _collect_artifact_roots(ckpt_path, args.config)
+        ckpt_name = os.path.basename(ckpt_path) if ckpt_path else "graphgen_hcanon_v1.pt"
+        ckpt_path = _resolve_artifact_path(
+            ckpt_path,
+            default_name=ckpt_name,
+            roots=artifact_roots,
+            label="Checkpoint file",
+        )
+        args.model_ckpt = ckpt_path
         state = torch.load(ckpt_path, map_location="cpu")
 
-        # 1) ВСЕГДА предпочитаем artifacts рядом с чекпойнтом (если CLI явно не указал иной путь)
-        aux_dir = os.path.join(os.path.dirname(ckpt_path) or ".", "artifacts")
-        z_path = args.zones_json if (args.zones_json and os.path.exists(args.zones_json)) else os.path.join(aux_dir, "zones.json")
-        s_path = args.services_json if (args.services_json and os.path.exists(args.services_json)) else os.path.join(aux_dir, "services.json")
-        norm_path = os.path.join(aux_dir, "target_normalizer.json")
+        artifact_roots = _collect_artifact_roots(ckpt_path, args.config)
+        z_path = _resolve_artifact_path(
+            args.zones_json,
+            default_name="zones.json",
+            roots=artifact_roots,
+            label="zones.json",
+        )
+        s_path = _resolve_artifact_path(
+            args.services_json,
+            default_name="services.json",
+            roots=artifact_roots,
+            label="services.json",
+            required=False,
+        )
+        norm_path = _resolve_artifact_path(
+            None,
+            default_name="target_normalizer.json",
+            roots=artifact_roots,
+            label="target_normalizer.json",
+        )
+        log.info(
+            "[infer] artifacts resolved: zones=%s services=%s normalizer=%s",
+            z_path,
+            s_path if os.path.exists(s_path) else "<none>",
+            norm_path,
+        )
 
         # 2) поднимаем словари (если services.json нет — S=0)
         with open(z_path, "r", encoding="utf-8") as f:
